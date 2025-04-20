@@ -1,4 +1,4 @@
-// **********************************************************************************************************************
+﻿// **********************************************************************************************************************
 // 
 // Copyright (c)2011, YoYo Games Ltd. All Rights reserved.
 // 
@@ -19,6 +19,20 @@ var ePlaybackSpeedType_FramesPerSecond = 0,
     ePlaybackSpeedType_Max = 2;
 
 var SKELETON_FRAMECOUNT = 2147483647;
+
+var g_IgnoreCull = false;
+
+
+function gpu_set_sprite_cull(_enable)
+{
+	g_IgnoreCull=yyGetBool(_enable)?false:true;
+}
+
+function gpu_get_sprite_cull()
+{
+	
+	return g_IgnoreCull ? false:true;
+}
 
 /**
  * Type of collision check used for this sprite.
@@ -75,6 +89,23 @@ YYRECT.prototype.Copy = function (_bbox) {
 	this.bottom = _bbox.bottom;
 };
 
+YYRECT.prototype.Intersection = function(r1, r2)
+{
+	var r = new YYRECT();
+	r.left = Math.max(r1.left, r2.left);
+	r.top = Math.max(r1.top, r2.top);
+	r.right = Math.min(r1.right, r2.right);
+	r.bottom = Math.min(r1.bottom, r2.bottom);
+	return r;
+};
+
+YYRECT.prototype.GetWidth = function () {
+	return this.right - this.left;
+};
+
+YYRECT.prototype.GetHeight = function () {
+	return this.bottom - this.top;
+};
 
 // @if feature("sprites")
 // #############################################################################################
@@ -177,6 +208,33 @@ yySprite.prototype.GetSkeletonSpriteSize = function (_skeleton)
 	return null;
 };
 
+yySprite.prototype.GetSkeletonSpriteBounds = function (_skeleton)
+{
+	// @if feature("spine")
+	var bounds = new YYRECT();
+
+	_skeleton.updateWorldTransform();
+
+	if (this.GetSkeletonBounds(_skeleton, bounds))
+	{
+		return bounds;
+	}
+
+	var skins = _skeleton.data.skins;
+	for (var i = 0; i < skins.length; ++i)
+	{
+		_skeleton.setSkin(skins[i]);
+		_skeleton.updateWorldTransform();
+
+		if (this.GetSkeletonBounds(_skeleton, bounds))
+		{
+			return bounds;
+		}
+	}
+	// @endif
+	return null;
+};
+
 /**
  * @param {spine.Skeleton} _skeleton
  * @param {YYRECT} _bounds
@@ -244,6 +302,117 @@ yySprite.prototype.GetSkeletonBounds = function (_skeleton, _bounds)
 	}
 	// @endif spine
 	return retval;
+};
+
+yySprite.prototype.SetBoundingBoxMode = function(bboxmode)
+{
+	if(bboxmode < 0 || bboxmode > 3)
+	{
+		return;
+	}
+
+	if(bboxmode == this.bboxmode)
+	{
+		return;
+	}
+
+	this.bboxmode = bboxmode;
+	this.ComputeBoundingBox();
+	this.MarkInstancesAsDirty();
+};
+
+yySprite.prototype.SetBoundingBox = function(bbox)
+{
+	if (this.bboxmode != 2 /* bboxmode_manual */)
+	{
+		return;
+	}
+
+	if (bbox.left != this.bbox.left || bbox.right != this.bbox.right || bbox.top != this.bbox.top || bbox.bottom != this.bbox.bottom)
+	{
+		this.bbox.left   = bbox.left;
+		this.bbox.right  = bbox.right;
+		this.bbox.top    = bbox.top;
+		this.bbox.bottom = bbox.bottom;
+
+		this.MarkInstancesAsDirty();
+	}
+};
+
+yySprite.prototype.ComputeBoundingBox = function()
+{
+	if (this.bboxmode == 0 /* bboxmode_automatic */)
+	{
+		// precise mode (should really look at the mask and get the bounds...)
+		var lleft = 100000;
+		var rright = -100000;
+		var ttop = 100000;
+		var bbottom  = -100000;
+
+
+		for (var i = 0; i < this.numb; i++)
+		{
+			var _pTPE = this.ppTPE[i];
+			var pByteData = Graphics_ExtractImageBytes(_pTPE);
+			var index = 0;
+			for (var k = 0; k < _pTPE.oh; k++)
+			{
+				for (var j = 0; j < _pTPE.ow; j++)
+				{
+					var index =((k*_pTPE.ow +j)*4)+3;
+					if(index<pByteData.length)
+					{
+						if (pByteData[index] > _tolerance)
+						{
+							if(j<lleft)
+								lleft = j;
+							if(j>rright)
+								rright = j;
+							if(k<ttop)
+								ttop = k;
+							if(k>bbottom)
+								bbottom = k;
+						}
+					}
+				}
+			}
+		}
+		if(lleft==0x7FFFFFFF) //No valid pixels
+		{
+			this.bbox.left = 0;
+			this.bbox.right =0;
+			this.bbox.top = 0;
+			this.bbox.bottom = 0;
+		}
+		else
+		{
+			this.bbox.left = lleft;
+			this.bbox.right =rright;
+			this.bbox.top = ttop;
+			this.bbox.bottom = bbottom;
+		}
+	}
+	else if (this.bboxmode == 1 /* bboxmode_fullimage */)
+	{
+		if (this.m_skeletonSprite)
+		{
+			var bounds = this.GetSkeletonSpriteBounds((new yySkeletonInstance(this.m_skeletonSprite)).m_skeleton);
+			if(bounds)
+			{
+				this.bbox = bounds;
+
+				/* Flip bounding box around origin on Y axis to match our co-ordinate space. */
+				this.bbox.top *= -1.0;
+				this.bbox.bottom *= -1.0;
+			}
+		}
+		else{
+			this.bbox.left = 0;
+			this.bbox.right = this.width;
+			this.bbox.top = 0;
+			this.bbox.bottom = this.height;
+		}
+	}
 };
 
 yySprite.prototype.GetScaledBoundingBox = function(_xscale, _yscale)
@@ -493,7 +662,7 @@ yySprite.prototype.BuildSWFData = function (_swfIndex, _xo, _yo) {
                     var pShape = null;
                     if (type === eDIType_Shape) {
                         pShape = new yySWFShape(type, id);
-                        byteOffset = pShape.BuildShapeData(dataView, byteOffset, littleEndian, this.SWFDictionaryItems);
+                        byteOffset = pShape.BuildShapeData(dataView, byteOffset, littleEndian, this.SWFDictionaryItems, false);
                     }
                     else if (type === eDIType_Bitmap) {
                         pShape = new yySWFBitmap(type, id);
@@ -552,27 +721,20 @@ yySprite.prototype.BuildSWFData = function (_swfIndex, _xo, _yo) {
 	// @endif
 };
 
-
-// #############################################################################################
-/// Function:<summary>
-///          	Setup collision masks for an SWF
-///          </summary>
-// #############################################################################################
-yySprite.prototype.SetupSWFCollisionMasks = function (_dataView, _byteOffset, _littleEndian) {
+yySprite.prototype.SetupSWFAndVectorCollisionMasks = function (_dataView, _byteOffset, _littleEndian, _maskWidth, _maskHeight, _numCollisionMasks) {
 	// @if feature("swf")
-    if (this.colcheck !== yySprite_CollisionType.PRECISE) {
-        return;
-    }
 
-    // Dispose of the original collision mask
+	// Dispose of the original collision mask
     this.colmask = [];
     
     // Set the w/h of the sprite according to the collision mask header of the timeline
-    this.width = this.SWFTimeline.collisionMaskHeader.maskWidth;
-	this.height = this.SWFTimeline.collisionMaskHeader.maskHeight;
+    this.width = _maskWidth;
+	this.height = _maskHeight;
 	
 	// shorthand this
-	var numCollisionMasks = this.SWFTimeline.collisionMaskHeader.numCollisionMasks;
+	var numCollisionMasks = _numCollisionMasks;
+
+
 
     // Load in the new collision mask	    
 	for (var i = 0; i < numCollisionMasks; i++)
@@ -597,17 +759,126 @@ yySprite.prototype.SetupSWFCollisionMasks = function (_dataView, _byteOffset, _l
 		    	mask[maskEntry++] = writeVal;
 		    }		    
 		}
-        var u8mask = new Uint8Array(mask.length);
-        for (var i = 0; i < mask.length; ++i)
-            u8mask[i] = mask[i];
-        this.colmask[i] = u8mask;
+        //var u8mask = new Uint8Array(mask.length);
+        //for (var k = 0; k < mask.length; ++k)
+        //    u8mask[k] = mask[k];
+        //this.colmask[i] = u8mask;
 		
+		var pByteData = mask;
+
+		var bwidth = this.bbox.right - this.bbox.left + 1; 
+		var mwidth = (bwidth + 7) >> 3; 
+		var ht = this.bbox.bottom - this.bbox.top + 1; 
+	
+		// get the image bytes
+		var wh = ht * mwidth;
+		var pData = new Uint8Array(wh);
+		for(var j=0;j<wh;j++) pData[j] = 0;	// clear the array
+	
+	
+
+	
+		var index = 0;
+		var _tolerance =0; //Doesn't seem to have a setting for this here
+
+		var validlength = pByteData.length ;
+		
+		for (var k = 0; k <= ht - 1; k++)
+		{
+			for (var j = 0; j < mwidth; j++)
+			{
+				var targ = 0;
+				var baseindex = (((k  * mwidth) + j) * 8);
+				if ((baseindex + 0 < validlength) && (pByteData[baseindex + 0] ) == true )targ |= (1 << 7);
+				if ((baseindex + 1 < validlength) && (pByteData[baseindex + 1] ) == true )targ |= (1 << 6);
+				if ((baseindex + 2 < validlength) && (pByteData[baseindex + 2] ) == true )targ |= (1 << 5);
+				if ((baseindex + 3 < validlength) && (pByteData[baseindex + 3] ) == true )targ |= (1 << 4);
+				if ((baseindex + 4 < validlength) && (pByteData[baseindex + 4] ) == true )targ |= (1 << 3);
+				if ((baseindex + 5 < validlength) && (pByteData[baseindex + 5] ) == true )targ |= (1 << 2);
+				if ((baseindex + 6 < validlength) && (pByteData[baseindex + 6] ) == true )targ |= (1 << 1);
+				if ((baseindex + 7 < validlength) && (pByteData[baseindex + 7] ) == true )targ |= (1 << 0);
+
+				pData[j + (k * mwidth)] = targ;
+			}
+		}
+	
+		this.colmask[i] = pData;
+
 		// Increment, taking alignment into account
 	    _byteOffset = offsetStore + ((colMaskSize + 3) & ~3);
 	}
+	
+
 	this.maskcreated = true;	
 	// @endif swf
 	return _byteOffset;
+};
+
+// #############################################################################################
+/// Function:<summary>
+///          	Setup collision masks for an SWF
+///          </summary>
+// #############################################################################################
+yySprite.prototype.SetupSWFCollisionMasks = function (_dataView, _byteOffset, _littleEndian) {
+	// @if feature("swf")
+    if (this.colcheck !== yySprite_CollisionType.PRECISE) {
+        return;
+    }
+
+	_byteOffset = this.SetupSWFAndVectorCollisionMasks(_dataView,
+		_byteOffset,
+		_littleEndian,
+		this.SWFTimeline.collisionMaskHeader.maskWidth,
+		this.SWFTimeline.collisionMaskHeader.maskHeight,
+		this.SWFTimeline.collisionMaskHeader.numCollisionMasks);
+
+	// @endif swf
+	return _byteOffset;    
+};
+
+
+// #############################################################################################
+/// Function:<summary>
+///          	Setup collision masks for a vector sprite
+///          </summary>
+// #############################################################################################
+yySprite.prototype.SetupVectorCollisionMasks = function (_dataView, _byteOffset, _littleEndian) {
+	// @if feature("swf")
+
+	// Read out collision masks header
+	var numCollisionMasks, maskWidth, maskHeight;	
+	numCollisionMasks = _dataView.getInt32(_byteOffset, _littleEndian);
+	_byteOffset+=4;
+	maskWidth = _dataView.getInt32(_byteOffset, _littleEndian);
+	_byteOffset+=4;
+	maskHeight = _dataView.getInt32(_byteOffset, _littleEndian);
+	_byteOffset+=4;
+
+	if ((this.colcheck === yySprite_CollisionType.PRECISE) && (numCollisionMasks > 0))
+	{
+		_byteOffset = this.SetupSWFAndVectorCollisionMasks(_dataView,
+			_byteOffset,
+			_littleEndian,
+			maskWidth,
+			maskHeight,
+			numCollisionMasks);
+
+		if (!this.m_LoadedFromChunk) {
+			this.colcheck = yySprite_CollisionType.PRECISE;
+		}
+	}
+	else
+	{
+		this.width = this.m_VectorShape.maxX - this.m_VectorShape.minX;
+		this.height = this.m_VectorShape.maxY - this.m_VectorShape.minY;
+
+		if (!this.m_LoadedFromChunk) {
+			this.colcheck = yySprite_CollisionType.AXIS_ALIGNED_RECT;
+		}
+	}
+
+	// @endif swf
+	return _byteOffset;    
 };
 
 // #############################################################################################
@@ -627,6 +898,79 @@ yySprite.prototype.SetSWFDrawRoutines = function () {
             this.SWFDictionaryItems, this.SWFTimeline, _ind, this.xOrigin, this.yOrigin, _x, _y, 1.0, 1.0, 0.0, 0xffffffff, _alpha, this.ppTPE);
     };
 	// @endif swf
+};
+
+// #############################################################################################
+/// Function:<summary>
+///          	Re-direct draw routines to those that draw SWFs for the sprite
+///          </summary>
+// #############################################################################################
+yySprite.prototype.SetVectorDrawRoutines = function () {
+	// @if feature("swf")
+    this.Draw = function (_ind, _x, _y, _xscale, _yscale, _angle, _colour, _alpha) {    
+	    Graphics_VectorSpriteDraw(
+	        this.SWFDictionaryItems, this.m_VectorShape, this.xOrigin, this.yOrigin, _x, _y, _xscale, _yscale, _angle, _colour, _alpha, this.ppTPE);
+    };
+    
+    this.DrawSimple = function (_ind, _x, _y, _alpha) {
+        Graphics_VectorSpriteDraw(
+            this.SWFDictionaryItems, this.m_VectorShape, this.xOrigin, this.yOrigin, _x, _y, 1.0, 1.0, 0.0, 0xffffffff, _alpha, this.ppTPE);
+    };
+	// @endif swf
+};
+
+
+// #############################################################################################
+/// Property: <summary>
+///           	Build SWF data associated with the sprite
+///           </summary>
+// #############################################################################################
+yySprite.prototype.BuildVectorData = function (_vecIndex, _xo, _yo) {
+	// @if feature("swf")
+    try {
+        if (g_pSpriteManager.vectorSpriteData !== undefined) {
+        
+            var littleEndian = true;
+            var byteOffset = 0;
+            var vecArrayBuffer = g_pSpriteManager.vectorSpriteData[_vecIndex];
+            
+            var dataView = new DataView(vecArrayBuffer);
+            if (dataView !== undefined) {                        
+            
+                // Read in the header details                            
+				var fileVersion = dataView.getUint32(byteOffset, littleEndian);
+                byteOffset += 4;
+
+				this.m_VectorShape = new yySWFShape(eDIType_Shape, 0);
+				byteOffset = this.m_VectorShape.BuildShapeData(dataView, byteOffset, littleEndian, null, true);                
+
+				// Sort out any collision masks                
+				byteOffset = this.SetupVectorCollisionMasks(dataView, byteOffset, littleEndian);
+
+				if(!this.m_LoadedFromChunk)
+				{
+                	this.bboxmode = 0;
+					this.preload = true;
+				}
+                
+                if (!this.m_LoadedFromChunk && this.colcheck === yySprite_CollisionType.AXIS_ALIGNED_RECT) {
+                    this.bbox.left = this.m_VectorShape.minX;
+		            this.bbox.right = this.m_VectorShape.maxX;
+		            this.bbox.top = this.m_VectorShape.minY;
+		            this.bbox.bottom = this.m_VectorShape.maxY;
+		            this.xOrigin = _xo;
+		            this.yOrigin = _yo;
+                }                
+                // i_numb = m_SWF_Timeline->numFrames;                
+                this.CalcCullRadius();                
+                this.SetVectorDrawRoutines();                	
+            }
+        }
+    }
+    catch (e) {
+        debug("Cannot build vector data " + e.message);
+    }
+	// @endif
 };
 
 
@@ -775,6 +1119,20 @@ yySprite.prototype.LoadFromSpineAsync = function (_filename, _callback) {
 				sprite.height = size[1];
 			}
 
+			var bounds = sprite.GetSkeletonSpriteBounds((new yySkeletonInstance(sprite.m_skeletonSprite)).m_skeleton);
+			if(bounds)
+			{
+				sprite.bboxmode = 1;
+				sprite.colcheck = yySprite_CollisionType.AXIS_ALIGNED_RECT;
+
+				sprite.bbox = bounds;
+
+				sprite.bbox.top *= -1.0;
+				sprite.bbox.bottom *= -1.0;
+
+				sprite.MarkInstancesAsDirty();
+			}
+
 			// Trigger async callback
 			if (_callback) {
 				_callback();
@@ -891,7 +1249,7 @@ function DecompressMask(_pSprite, _mask) {
 			}
 		}
 	}
-	_pSprite.Masks[_mask] = m;
+	_pSprite.colmask[_mask] = m;
 }
 
 // #############################################################################################
@@ -931,6 +1289,11 @@ function    CreateSpriteFromStorage( _pStore )
 	if (_pStore.swf !== undefined) {
 		pSprite.m_LoadedFromChunk = true;
 	    pSprite.BuildSWFData(_pStore.swf, pSprite.xOrigin, pSprite.yOrigin);
+	}
+
+	if (_pStore.vector !== undefined) {
+		pSprite.m_LoadedFromChunk = true;
+	    pSprite.BuildVectorData(_pStore.vector, pSprite.xOrigin, pSprite.yOrigin);
 	}
 	// @endif
 
@@ -986,29 +1349,7 @@ function    CreateSpriteFromStorage( _pStore )
         	if (!_pStore.Decompressed) DecompressMask(pSprite, i);
 
             pSprite.maskcreated = true;
-            var size = pSprite.width * pSprite.height;
-            var mask = new Uint8Array(size);
-            
-            // unpack the mask
-		    var strideM = ((pSprite.width+7)>>3); //8;
-		    var offs = 0;
-		    for( var y=0; y<pSprite.height; ++y, offs+=strideM)
-		    {
-			    var m = 0x80;
-			    var oM = offs;
-			    for(var x=0; x<pSprite.width; ++x, m>>=1) 
-			    {
-				    if (m==0) 
-				    {
-					    m=0x80;
-					    ++oM;
-				    } 
-				    mask[x + (y * pSprite.width)] = ((pSprite.Masks[i][oM] & m)!=0);
-			    } 
-		    } 
-            
-            
-            pSprite.colmask[i] = mask;
+
 		}
 
     }
@@ -1023,6 +1364,57 @@ function SphereIsVisible(position, radius)
 	var frustum = GetViewFrustum();
 	return frustum.IntersectsSphere(worldMat.TransformVec3(position), radius * cullScale);
 }
+
+function sphere_is_visible(_x,_y,_z,_r)
+{
+	var frustum = GetViewFrustum();
+	return frustum.IntersectsSphere(new Vector3(yyGetReal(_x),yyGetReal(_y),yyGetReal(_z)), yyGetReal(_r));
+}
+
+
+yySprite.prototype.CreateMask = function(){
+
+	var i = 0;
+	var j = 0;
+	var k = 0;
+
+    this.colmask = [];
+  // Check whether we really need a mask
+  	if ( this.colcheck != yySprite_CollisionType.PRECISE )
+  	{
+		 return; 
+	}
+
+	if ( this.numb == 0 )
+	{ return; }
+
+	// RK :: Transitional state... if we are using tpage entries then 
+	if ((this.ppTPE != null) && (this.localTPE == false)) return;
+
+	var pSpr = this;
+
+	// Compute the mask(s)
+	var ppTPE = pSpr.ppTPE;
+	pSpr.colmask = [];
+	if(pSpr.sepmasks)
+	{
+		for (var i = 0; i < pSpr.numb; i++)
+		{
+			pSpr.colmask[i] = TMaskCreate(null, pSpr.ppTPE[i], 0, pSpr.bbox, MASK_PRECISE, 0);
+		}
+	}
+	else
+	{
+		// If not separate masks, then OR them altogether. 
+		pSpr.colmask[0] = TMaskCreate(pSpr.colmask[0], pSpr.ppTPE[0], 0, pSpr.bbox, MASK_PRECISE, 0);
+	
+		for (var i=1;i < pSpr.numb; i++){
+			pSpr.colmask[0] = TMaskCreate(pSpr.colmask[0], pSpr.ppTPE[i], 0, pSpr.bbox, MASK_PRECISE, 0);
+		}
+	}
+	pSpr.maskcreated = true;
+};
+
 
 // #############################################################################################
 /// Function:<summary>
@@ -1044,7 +1436,7 @@ yySprite.prototype.DrawSimple = function (_sub_image, _x, _y, _alpha) {
 
 	var cullRadius  = this.cullRadius;
 
-	if (SphereIsVisible(new Vector3(_x, _y, GR_Depth), cullRadius))
+	if (g_IgnoreCull || SphereIsVisible(new Vector3(_x, _y, GR_Depth), cullRadius))
 	{
 		_sub_image = (~ ~_sub_image) % this.numb;
 		if (_sub_image < 0) _sub_image = _sub_image + this.numb;
@@ -1053,7 +1445,10 @@ yySprite.prototype.DrawSimple = function (_sub_image, _x, _y, _alpha) {
 		if (!this.ppTPE) return;
         // Make sure we're not dealing with a texture that's been downsized to fit the tpage
         var pTPE = this.ppTPE[_sub_image];
-        if (!pTPE) return; // no loaded? texture group etc?
+        if (!pTPE) { // no loaded? texture group etc?
+			console.log("Error: Texture page for " + this.pName + " is not loaded");
+			return;
+		}
 		
 		// @if feature("nineslice")
         if ((this.nineslicedata != null) && (this.nineslicedata.enabled == true))
@@ -1123,7 +1518,7 @@ yySprite.prototype.Draw = function (_ind, _x, _y, _xscale, _yscale, _angle, _col
 		cullRadius = ycullRadius;
 	}
 
-	if (SphereIsVisible(new Vector3(_x, _y, GR_Depth), cullRadius))
+	if (g_IgnoreCull || SphereIsVisible(new Vector3(_x, _y, GR_Depth), cullRadius))
 	{
 		// Index wraps..
 		_ind = (~ ~_ind) % this.numb;
@@ -1138,12 +1533,47 @@ yySprite.prototype.Draw = function (_ind, _x, _y, _xscale, _yscale, _angle, _col
 		} else // ->
 		// @endif
 		{
-		    // undefined forces colour+alpha into ALL verts
-		    Graphics_TextureDraw(this.ppTPE[_ind], this.xOrigin, this.yOrigin, _x, _y, _xscale, _yscale, _angle * Math.PI / 180.0, _colour, undefined, undefined, undefined, _alpha);
+			const pTPE = this.ppTPE[_ind];
+			if (!pTPE) {
+				console.log("Error: Texture group for " + this.pName + " is not loaded");
+			}
+			else {
+				// undefined forces colour+alpha into ALL verts
+				Graphics_TextureDraw(pTPE, this.xOrigin, this.yOrigin, _x, _y, _xscale, _yscale, _angle * Math.PI / 180.0, _colour, undefined, undefined, undefined, _alpha);
+			}
 		}
 	}
 };
 
+yySprite.prototype.DrawTiled = function(_ind, _x, _y, _xscale, _yscale, _htile, _vtile, _tile_xr, _tile_yr, _tile_wr, _tile_hr, _colour, _alpha) {
+
+	if (this.numb <= 0) {
+		return;
+	}
+
+	if (this.sequence != null) {
+		if (_ind < 0)
+			return; // denotes empty space in the sequence
+	}
+
+	if ((this.nineslicedata != null) && this.nineslicedata.GetEnabled())
+	{
+		yyError("This function can't be used to draw sprites that have nine-slice drawing enabled");
+	}
+	else
+	{
+		// get current frame and round (it will be a fraction), then MOD to number of frames
+		_ind = (~~_ind) % this.ppTPE.length;
+
+		const pTPE = this.ppTPE[_ind];
+		if (!pTPE) {
+			console.log("Error: Texture page for " + this.pName + " is not loaded");
+		}
+		else {
+			Graphics_TextureDrawTiled(pTPE, this.xOrigin, this.yOrigin, _x, _y, _xscale, _yscale, _htile, _vtile, _tile_xr, _tile_yr, _tile_wr, _tile_hr, _colour, _alpha);
+		}
+	}
+};
 
 yySprite.prototype.GetSkeletonSlotsAtPoint = function(_inst, _x, _y, _list)
 {
@@ -1169,8 +1599,6 @@ yySprite.prototype.GetSkeletonSlotsAtPoint = function(_inst, _x, _y, _list)
 	// @endif spine
 };
 
-
-
 // #############################################################################################
 /// Function:<summary>
 ///             Get the actual sprite data.
@@ -1193,12 +1621,38 @@ yySprite.prototype.Sprite_DrawSimplePos = function (_sub_image, _x1, _y1, _x2, _
 };
 // @endif
 
-function _ColMaskSet(u, v, pMaskBase,width)
-{
-	//HTML5 Doesn't have compressed masks so this is simpler
-	return pMaskBase[u + (v * width)]
-};
 
+
+yySprite.prototype.ColMaskSet=function(u,v,pMaskBase)
+{
+
+	if(pMaskBase !==null && pMaskBase !== undefined)
+	{
+		if ((u < this.bbox.left) || (u > this.bbox.right)) return false;
+		if ((v < this.bbox.top) || (v > this.bbox.bottom)) return false;
+
+
+		u -= this.bbox.left;
+		v -= this.bbox.top;
+
+		var bwidth = this.bbox.right - this.bbox.left + 1;
+		var mwidth = (bwidth + 7) >> 3;
+		var ouroff = u >> 3;
+
+		var mask = pMaskBase[v * mwidth + ouroff];
+
+		var ourbit = 7 - (u & 7);
+
+		if (mask & (1 << ourbit))
+		{
+			return true;
+		}
+		else
+			return false;		
+	}
+
+	return true;
+};
 
 yySprite.prototype.CollisionTilemapLine= function (bb2,xl,yl,xr,yr)
 {
@@ -1292,7 +1746,7 @@ yySprite.prototype.CollisionTilemapEllipse= function (bb2,xl,yl,xr,yr)
 	return false;
 };
 
-yySprite.prototype.PreciseCollisionTilemapRect= function ( tMaskData, bb2, t_ibbox,  xl,  yl,  xr, yr,  sprwidth)
+yySprite.prototype.PreciseCollisionTilemapRect= function ( tMaskData, bb2, t_ibbox,  xl,  yl,  xr, yr)
 {
 
 	var l = yymax(xl, bb2[0].x);
@@ -1332,7 +1786,7 @@ yySprite.prototype.PreciseCollisionTilemapRect= function ( tMaskData, bb2, t_ibb
 				if ((v2 < _stopedge) || (v2 >= _sbottomedge)) continue;
 				if ((u2 < _sleftedge) || (u2 >= _srightedge)) continue;
 
-				if (!_ColMaskSet(~~u2, ~~v2, tMaskData, sprwidth))
+				if (!this.ColMaskSet(~~u2, ~~v2, tMaskData))
 					continue;
 
 			}
@@ -1344,8 +1798,7 @@ yySprite.prototype.PreciseCollisionTilemapRect= function ( tMaskData, bb2, t_ibb
 
 };
 
-
-yySprite.prototype.PreciseCollisionTilemapLine= function ( tMaskData, bb2, t_ibbox,  xl,  yl,  xr, yr,  sprwidth)
+yySprite.prototype.PreciseCollisionTilemapLine= function ( tMaskData, bb2, t_ibbox,  xl,  yl,  xr, yr)
 {
 
 
@@ -1371,7 +1824,7 @@ yySprite.prototype.PreciseCollisionTilemapLine= function ( tMaskData, bb2, t_ibb
 		if ((v2 < _stopedge) || (v2 >= _sbottomedge)) return false;
 		if ((u2 < _sleftedge) || (u2 >= _srightedge)) return false;
 
-		if (_ColMaskSet(~~u2, ~~v2, tMaskData,sprwidth))
+		if (this.ColMaskSet(~~u2, ~~v2, tMaskData))
 			return true;
 
 		return false;
@@ -1398,7 +1851,7 @@ yySprite.prototype.PreciseCollisionTilemapLine= function ( tMaskData, bb2, t_ibb
 			if ((v2 < _stopedge) || (v2 >= _sbottomedge)) continue;
 			if ((u2 < _sleftedge) || (u2 >= _srightedge)) continue;
 
-			if (_ColMaskSet(~~u2, ~~v2, tMaskData,sprwidth))
+			if (this.ColMaskSet(~~u2, ~~v2, tMaskData))
 				return true;		
 		}
 	}
@@ -1431,7 +1884,7 @@ yySprite.prototype.PreciseCollisionTilemapLine= function ( tMaskData, bb2, t_ibb
 			if ((v2 < _stopedge) || (v2 >= _sbottomedge)) continue;
 			if ((u2 < _sleftedge) || (u2 >= _srightedge)) continue;
 
-			if (_ColMaskSet(~~u2, ~~v2, tMaskData,sprwidth))
+			if (this.ColMaskSet(~~u2, ~~v2, tMaskData))
 				return true;
 		}
 
@@ -1441,7 +1894,7 @@ yySprite.prototype.PreciseCollisionTilemapLine= function ( tMaskData, bb2, t_ibb
 
 };
 
-yySprite.prototype.PreciseCollisionTilemapEllipse= function ( tMaskData, bb2, t_ibbox,  xl,  yl,  xr, yr,  sprwidth)
+yySprite.prototype.PreciseCollisionTilemapEllipse= function ( tMaskData, bb2, t_ibbox,  xl,  yl,  xr, yr)
 {
 	var l = yymax(xl, bb2[0].x);
 
@@ -1486,7 +1939,7 @@ yySprite.prototype.PreciseCollisionTilemapEllipse= function ( tMaskData, bb2, t_
 			if ((v2 < _stopedge) || (v2 >= _sbottomedge)) continue;
 			if ((u2 < _sleftedge) || (u2 >= _srightedge)) continue;
 
-			if (_ColMaskSet(~~u2, ~~v2, tMaskData,sprwidth))
+			if (this.ColMaskSet(~~u2, ~~v2, tMaskData))
 				return true;
 
 
@@ -1496,7 +1949,7 @@ yySprite.prototype.PreciseCollisionTilemapEllipse= function ( tMaskData, bb2, t_
 
 };
 
-yySprite.prototype.PreciseCollisionTilemap = function (img1, bb1, _x1, _y1, scale1x, scale1y, angle1, bb2, t_ibbox,tMaskData,sprwidth) {
+yySprite.prototype.PreciseCollisionTilemap = function (img1, bb1, _x1, _y1, scale1x, scale1y, angle1, bb2, t_ibbox,tMaskData,spr) {
 
 
 	// Compute overlapping bounding box
@@ -1583,7 +2036,7 @@ yySprite.prototype.PreciseCollisionTilemap = function (img1, bb1, _x1, _y1, scal
 					var v1 = ((j - _y1) * scale1y + this.GetYOrigin());
 
 					if ((v1 < topedge) || (v1 >= bottomedge)) continue;
-					if (!_ColMaskSet(u1i, ~~v1, maskdata,ourwidth))
+					if (!this.ColMaskSet(u1i, ~~v1, maskdata))
 						continue;
 				}
 
@@ -1592,7 +2045,7 @@ yySprite.prototype.PreciseCollisionTilemap = function (img1, bb1, _x1, _y1, scal
 					if ((v2 < _stopedge) || (v2 >= _sbottomedge)) continue;
 					if ((u2 < _sleftedge) || (u2 >= _srightedge)) continue;
 
-					if (!_ColMaskSet(~~u2, ~~v2, maskdata2,sprwidth))
+					if (!spr.ColMaskSet(~~u2, ~~v2, maskdata2))
 						continue;
 
 				}
@@ -1631,7 +2084,7 @@ yySprite.prototype.PreciseCollisionTilemap = function (img1, bb1, _x1, _y1, scal
 				if ((v1 < topedge) || (v1 >= bottomedge)) continue;
 				if (maskdata != null)
 				{
-					if (!_ColMaskSet(~~u1, ~~v1, maskdata,ourwidth))
+					if (!this.ColMaskSet(~~u1, ~~v1, maskdata))
 						continue;
 				}
 
@@ -1640,7 +2093,7 @@ yySprite.prototype.PreciseCollisionTilemap = function (img1, bb1, _x1, _y1, scal
 					if ((v2 < _stopedge) || (v2 >= _sbottomedge)) continue;
 					if ((u2 < _sleftedge) || (u2 >= _srightedge)) continue;
 
-					if (!_ColMaskSet(~~u2, ~~v2, maskdata2, sprwidth))
+					if (!spr.ColMaskSet(~~u2, ~~v2, maskdata2))
 						continue;
 
 				}
@@ -1694,9 +2147,7 @@ yySprite.prototype.PreciseCollisionPoint = function (_img1, _bb1, _x1, _y1, _sca
 		yy = Math.floor((cc * (_y - _y1) - ss * (_x - _x1)) / _scaley + this.yOrigin);
 	}
 
-	if ((xx < 0) || (xx >= this.width)) return false;
-	if ((yy < 0) || (yy >= this.height)) return false;
-	return this.colmask[_img1][xx + (yy * this.width)];
+	return this.ColMaskSet(xx,  yy,this.colmask[_img1]);
 };
 
 
@@ -1747,7 +2198,9 @@ yySprite.prototype.PreciseCollisionRectangle = function (_img1, _bb1, _x1, _y1, 
 				var yy = ~~(j - _y1 + this.yOrigin);
 				if ((xx < 0) || (xx >= this.width)) continue;
 				if ((yy < 0) || (yy >= this.height)) continue;
-				if (this.colmask[_img1][xx + (yy * this.width)] == true) return true;
+				if(this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+					return true;
+				
 			}
 		}
 	}
@@ -1766,7 +2219,9 @@ yySprite.prototype.PreciseCollisionRectangle = function (_img1, _bb1, _x1, _y1, 
 				var yy = Math.floor((cc * (j - _y1) - ss * (i - _x1)) * onescaley + this.yOrigin);
 				if ((xx < 0) || (xx >= this.width)) continue;
 				if ((yy < 0) || (yy >= this.height)) continue;
-				if (this.colmask[_img1][xx + (yy * this.width)]) return true;
+				if(this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+					return true;
+
 			}
 		}
 	}
@@ -1813,7 +2268,7 @@ yySprite.prototype.PreciseCollisionEllipse = function (_img1, _bb1, _x1, _y1, _s
 	var my = ((_rr.bottom + _rr.top) / 2);
 	var ww = 1.0 / ((_rr.right - _rr.left) / 2);
 	var hh = 1.0 / ((_rr.bottom - _rr.top) / 2);
-	var pMask = this.colmask[_img1];
+
 
     var tmp;
 	if ((_scalex == 1) && (_scaley == 1) && (Math.abs(_angle) < 0.0001))
@@ -1835,7 +2290,9 @@ yySprite.prototype.PreciseCollisionEllipse = function (_img1, _bb1, _x1, _y1, _s
 				var yy = j - _y1 + this.yOrigin;
 				if ((yy < 0) || (yy >= this.height)) continue;
 
-				if (pMask[xx + (yy * this.width)]) return true;
+				if(this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+					return true;
+
 			}
 		}
 	}
@@ -1868,7 +2325,9 @@ yySprite.prototype.PreciseCollisionEllipse = function (_img1, _bb1, _x1, _y1, _s
 				var yy = ~ ~(((cc * j_y1 - ss_i_x1) * onescaley) + this.yOrigin);
 				if ((yy < 0) || (yy >= this.height)) continue;
 
-				if (pMask[xx + (yy * this.width)]) return true;
+
+				if(this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+					return true;
 			}
 		}
 	}
@@ -2008,9 +2467,11 @@ yySprite.prototype.PreciseCollision = function (_img1, _bb1, _x1, _y1, _scale1x,
 	                var v1 = ((j - _y1) * _scale1y + this.yOrigin);
 
 	                if ((v1 < topedge) || (v1 >= bottomedge)) continue;
-	                if (this.maskcreated) {
-	                    if (!this.colmask[_img1][u1i + (~~(v1) * this.width)]) continue;
-	                }
+
+					if (this.maskcreated)
+						if(!this.ColMaskSet(u1i,  ~~v1,this.colmask[_img1]))
+							continue;
+
 	            }
 				
 	            if (spr.colcheck === yySprite_CollisionType.PRECISE)
@@ -2020,7 +2481,8 @@ yySprite.prototype.PreciseCollision = function (_img1, _bb1, _x1, _y1, _scale1x,
 
 	                if ((v2 < stopedge) || (v2 >= sbottomedge)) continue;
 	                if (spr.maskcreated) {
-	                    if (!spr.colmask[_img2][u2i + (~~(v2) * spr.width)]) continue;
+						if(!spr.ColMaskSet(u2i,  ~~v2,spr.colmask[_img2]))
+							continue;
 	                }
 	            }
 	            return true;
@@ -2076,7 +2538,8 @@ yySprite.prototype.PreciseCollision = function (_img1, _bb1, _x1, _y1, _scale1x,
 	            {
 	                if (this.maskcreated) 
 	                {
-	                    if (!this.colmask[_img1][~~(u1) + (~~(v1) * this.width)]) continue;
+						if(!this.ColMaskSet(~~u1,  ~~v1,this.colmask[_img1]))
+							continue;
 	                }
 	            }
 
@@ -2097,7 +2560,8 @@ yySprite.prototype.PreciseCollision = function (_img1, _bb1, _x1, _y1, _scale1x,
 	            {
 	                if (spr.maskcreated) 
 	                {
-	                    if (!spr.colmask[_img2][~~(u2) + (~~(v2) * spr.width)]) continue;
+						if(!spr.ColMaskSet(u2,  ~~v2,spr.colmask[_img2]))
+							continue;
 	                }
 	            }
 	            return true;
@@ -2143,14 +2607,17 @@ yySprite.prototype.OrigPreciseCollision = function (_img1, _bb1, _x1, _y1, _scal
                 if ((xx < 0) || (xx >= this.width)) continue;
                 if ((yy < 0) || (yy >= this.height)) continue;
                 if (this.maskcreated) {
-                    if (!this.colmask[_img1][xx + (yy * this.width)]) continue;
+					if(!this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+						continue;
                 }
                 xx = i - _x2 + _pSpr.xOrigin;
                 yy = j - _y2 + _pSpr.yOrigin;
                 if ((xx < 0) || (xx >= _pSpr.width)) continue;
                 if ((yy < 0) || (yy >= _pSpr.height)) continue;
                 if (_pSpr.maskcreated) {
-                    if (!_pSpr.colmask[_img2][xx + (yy * _pSpr.width)]) continue;
+                    
+					if(!_pSpr.ColMaskSet(xx,  yy,_pSpr.colmask[_img2]))
+						continue;
                 }
                 return true;
             }
@@ -2165,14 +2632,17 @@ yySprite.prototype.OrigPreciseCollision = function (_img1, _bb1, _x1, _y1, _scal
                 if ((xx < 0) || (xx >= this.width)) continue;
                 if ((yy < 0) || (yy >= this.height)) continue;
                 if (this.maskcreated) {
-                    if (!this.colmask[_img1][xx + (yy * this.width)]) continue;
+
+					if(!this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+						continue;
                 }
                 xx = Math.floor(((i - _x2) * _scale2x + _pSpr.xOrigin));
                 yy = Math.floor(((j - _y2) * _scale2y + _pSpr.yOrigin));
                 if ((xx < 0) || (xx >= _pSpr.width)) continue;
                 if ((yy < 0) || (yy >= _pSpr.height)) continue;
                 if (_pSpr.maskcreated) {
-                    if (!_pSpr.colmask[_img2][xx + (yy * _pSpr.width)]) continue;
+					if(!_pSpr.ColMaskSet(xx,  yy,_pSpr.colmask[_img2]))
+						continue;
                 }
                 return true;
             }
@@ -2195,7 +2665,8 @@ yySprite.prototype.OrigPreciseCollision = function (_img1, _bb1, _x1, _y1, _scal
                 if ((yy < 0) || (yy >= this.height)) continue;
 
                 if (this.maskcreated) {
-                    if (!this.colmask[_img1][xx + (yy * this.width)]) continue;
+					if(!this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+						continue;
                 }
 
                 xx = Math.floor(((cc2 * (i - _x2) + ss2 * (j - _y2)) * _scale2x + _pSpr.xOrigin));
@@ -2204,7 +2675,8 @@ yySprite.prototype.OrigPreciseCollision = function (_img1, _bb1, _x1, _y1, _scal
                 if ((yy < 0) || (yy >= _pSpr.height)) continue;
 
                 if (_pSpr.maskcreated) {
-                    if (!_pSpr.colmask[_img2][xx + (yy * _pSpr.width)]) continue;
+					if(!_pSpr.ColMaskSet(xx,  yy,_pSpr.colmask[_img2]))
+						continue;
                 }
                 return true;
             }
@@ -2293,9 +2765,10 @@ yySprite.prototype.PreciseCollisionLine = function (_img1, _bb1, _x1, _y1, _scal
 		{
 			var xx = Math.floor((cc * (i - _x1) + ss * (_yl + (i - _xl) * dd - _y1)) / _scalex + this.xOrigin);
 			var yy = Math.floor((cc * (_yl + (i - _xl) * dd - _y1) - ss * (i - _x1)) / _scaley + this.yOrigin);
-			if ((xx < 0) || (xx >= this.width)) continue;
-			if ((yy < 0) || (yy >= this.height)) continue;
-			if (this.colmask[_img1][xx + (yy * this.width)]) return true;
+
+
+			if(this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+				return true;
 		}
 	}
 	else
@@ -2318,9 +2791,9 @@ yySprite.prototype.PreciseCollisionLine = function (_img1, _bb1, _x1, _y1, _scal
 		{
 			var xx = Math.floor((cc * (_xl + (i - _yl) * dd - _x1) + ss * (i - _y1)) / _scalex + this.xOrigin);
 			var yy = Math.floor((cc * (i - _y1) - ss * (_xl + (i - _yl) * dd - _x1)) / _scaley + this.yOrigin);
-			if ((xx < 0) || (xx >= this.width)) continue;
-			if ((yy < 0) || (yy >= this.height)) continue;
-			if (this.colmask[_img1][xx + (yy * this.width)]) return true;
+
+			if(this.ColMaskSet(xx,  yy,this.colmask[_img1]))
+				return true;
 		}
 	}
 
@@ -2354,11 +2827,33 @@ yySprite.prototype.GetTPE = function(_ind) {
 	return null;
 };
 
+yySprite.prototype.MarkInstancesAsDirty = function()
+{
+	var self = this; /* 'this' gets reset to 'window' inside process_instances... */
 
+	var process_instances = function(list)
+	{
+		var pool = list.pool;
+		for (var i = 0; i < pool.length; i++) {
+			var pInst = pool[i];
 
+			var pInstCollisionSprite;
+			if (pInst.mask_index >= 0) {
+				pInstCollisionSprite = g_pSpriteManager.Get(pInst.mask_index);
+			}
+			else{
+				pInstCollisionSprite = g_pSpriteManager.Get(pInst.sprite_index);
+			}
 
+			if(pInstCollisionSprite === self) {
+				pInst.bbox_dirty = true;
+			}
+		}
+	};
 
-
+	process_instances(g_RunRoom.m_Active);
+	process_instances(g_RunRoom.m_Deactive);
+};
 
 // #############################################################################################
 /// Function:<summary>
@@ -2475,6 +2970,7 @@ yySpriteManager.prototype.List = function () {
 ///				
 // #############################################################################################
 yySpriteManager.prototype.Delete = function(_id) {
+	var res = false;
 	var pSprite = this.Sprites[_id];
 	if (pSprite != undefined) {
 		var flush = true;
@@ -2482,20 +2978,36 @@ yySpriteManager.prototype.Delete = function(_id) {
 			var pTPE = pSprite.ppTPE[i];
 			if (!pTPE || !pTPE.texture) continue;
 			var pTexture = pTPE.texture;
-			if (!pTexture || !pTexture.webgl_textureid) continue;
-			if (flush) {
-				g_webGL.FlushAll();
-				flush = false;
-			}
-			
-			// Update state manager here 
-			g_webGL.RSMan.ClearTexture(pTexture.webgl_textureid); 
 
-			g_webGL.DeleteTexture(pTexture.webgl_textureid.Texture);
-			pTexture.webgl_textureid = null;
+			if ((g_pGMFile.Options.WebGL) && (g_pGMFile.Options.WebGL != 0))
+			{
+
+				if (!pTexture || !pTexture.webgl_textureid) continue;
+				if (flush) {
+					g_webGL.FlushAll();
+					flush = false;
+				}
+				
+				// Update state manager here 
+				g_webGL.RSMan.ClearTexture(pTexture.webgl_textureid); 
+
+				g_webGL.DeleteTexture(pTexture.webgl_textureid.Texture);
+				pTexture.webgl_textureid = null;
+			}
+			else
+			{
+				if(pTPE.tp>=0 && pTPE.tp<g_Textures.length)
+				{
+					g_Textures[pTPE.tp]=null;
+					pTPE.tp = -1;
+				}
+					 
+			}
 		}
 		this.Sprites[_id] = undefined;
+		res = true;
 	}
+	return res;
 };
 
 
@@ -2561,6 +3073,72 @@ yySpriteManager.prototype.SWFLoad = function (_data) {
     }
     catch (e) {
         debug("Cannot parse SWF data " + e.message);        
+    }
+	// @endif swf
+};
+
+// #############################################################################################
+/// Function:<summary>
+///          	Parse the loaded SWF data
+///             SWFs only supported for WebGL where we're expecting Uint8Arrays to exist, on IE it'll take exception
+///          </summary>
+// #############################################################################################
+yySpriteManager.prototype.VecLoad = function (_data) {
+	// @if feature("swf")
+    try {
+        // header consists of:
+        // "rvec";
+        // major.minor.version;
+        // header size; (to offset to the start of the vector sprite data
+        // number of vector sprites;
+        // size of each vector sprite;                  
+        var dataview = {
+            data: new Uint8Array(_data),
+            offset: 0
+        };            
+        function nextString (_dataview) {
+            var separator = ";";
+            var str = "";
+            while (dataview.offset < _dataview.data.byteLength) {                    
+                if (_dataview.data[dataview.offset] === separator.charCodeAt(0)) {
+                    dataview.offset++;
+                    break;
+                }
+                str = str + String.fromCharCode(_dataview.data[dataview.offset]);                    
+                dataview.offset++;
+            }
+            return str;
+        };
+               
+        var type = nextString(dataview);
+        if (type == "rvec") {            
+            
+            // Make sure the vector sprite loading code knows what version it's dealing with
+            var version = nextString(dataview),            
+                versionInfo = version.split('.', 3);
+                
+            g_VectorSpriteVersion.major = parseInt(versionInfo[0]);
+            g_VectorSpriteVersion.minor = parseInt(versionInfo[1]);
+            g_VectorSpriteVersion.version = parseInt(versionInfo[2]);
+            
+            var headerSize = parseInt(nextString(dataview)),
+                spriteCount = parseInt(nextString(dataview));
+
+            // Get the version code, header size and sprite count
+            this.vectorSpriteData = [];
+
+            // Extract each SWF            
+            var dataOffset = headerSize;
+            for (var i = 0; i < spriteCount; i++) {
+                                               
+                var vecSize = parseInt(nextString(dataview));
+                this.vectorSpriteData[i] = _data.slice(dataOffset, dataOffset + vecSize);                
+                dataOffset += vecSize;
+            }
+        }
+    }
+    catch (e) {
+        debug("Cannot parse vector sprite data " + e.message);        
     }
 	// @endif swf
 };

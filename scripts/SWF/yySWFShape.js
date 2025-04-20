@@ -28,6 +28,12 @@ var g_SWFVersion = {
     version: 1
 };
 
+var g_VectorSpriteVersion = {
+    major: 0,
+    minor: 0,
+    version: 1
+};
+
 // #############################################################################################
 /// Function:<summary>
 ///             Initialise an SWF shape
@@ -45,7 +51,7 @@ function yySWFShape(_type, _id) {
 ///             Parse shape data for this shape
 ///          </summary>
 // #############################################################################################
-yySWFShape.prototype.BuildShapeData = function (_dataView, _byteOffset, _littleEndian, _SWFDictionary) {
+yySWFShape.prototype.BuildShapeData = function (_dataView, _byteOffset, _littleEndian, _SWFDictionary, _isVectorSprite) {
 
     this.minX = _dataView.getFloat32(_byteOffset, _littleEndian);
     _byteOffset += 4;
@@ -78,9 +84,9 @@ yySWFShape.prototype.BuildShapeData = function (_dataView, _byteOffset, _littleE
         styleGroup.LineStyles = (numLineStyles > 0) ? [] : null;
         styleGroup.SubShapes = (numSubShapes > 0) ? [] : null;
         
-        _byteOffset = this.BuildFillStyles(styleGroup, _dataView, _byteOffset, _littleEndian, _SWFDictionary);
-        _byteOffset = this.BuildLineStyles(styleGroup, _dataView, _byteOffset, _littleEndian);
-        _byteOffset = this.BuildSubShapes(styleGroup, _dataView, _byteOffset, _littleEndian);
+        _byteOffset = this.BuildFillStyles(styleGroup, _dataView, _byteOffset, _littleEndian, _SWFDictionary, _isVectorSprite);
+        _byteOffset = this.BuildLineStyles(styleGroup, _dataView, _byteOffset, _littleEndian, _isVectorSprite);
+        _byteOffset = this.BuildSubShapes(styleGroup, _dataView, _byteOffset, _littleEndian, _isVectorSprite);
         
         this.StyleGroups.push(styleGroup);
     }        
@@ -93,7 +99,7 @@ yySWFShape.prototype.BuildShapeData = function (_dataView, _byteOffset, _littleE
 ///             Parse fill styles data
 ///          </summary>
 // #############################################################################################
-yySWFShape.prototype.BuildFillStyles = function (_styleGroup, _dataView, _byteOffset, _littleEndian, _SWFDictionary) {
+yySWFShape.prototype.BuildFillStyles = function (_styleGroup, _dataView, _byteOffset, _littleEndian, _SWFDictionary, _isVectorSprite) {
 
     _styleGroup.FillStyles = [];
     for (var i = 0; i < _styleGroup.numFillStyles; i++)
@@ -392,7 +398,7 @@ yySWFShape.prototype.SampleGradient = function (_gradient, _ratio) {
 ///             Parse line styles data
 ///          </summary>
 // #############################################################################################
-yySWFShape.prototype.BuildLineStyles = function (_styleGroup, _dataView, _byteOffset, _littleEndian) {
+yySWFShape.prototype.BuildLineStyles = function (_styleGroup, _dataView, _byteOffset, _littleEndian, _isVectorSprite) {
 
     _styleGroup.LineStyles = [];
     for (var i = 0; i < _styleGroup.numLineStyles; i++)
@@ -419,9 +425,14 @@ yySWFShape.prototype.BuildLineStyles = function (_styleGroup, _dataView, _byteOf
 ///             Parse sub shape data
 ///          </summary>
 // #############################################################################################
-yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOffset, _littleEndian) {
+yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOffset, _littleEndian, _isVectorSprite) {
 
     var i, m;
+
+	if (_isVectorSprite === undefined)
+	{
+		_isVectorSprite = false;
+	}
 
     _styleGroup.SubShapes = [];
     for (i = 0; i < _styleGroup.numSubShapes; i++) {
@@ -438,6 +449,15 @@ yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOff
 
 		pSubShape.numPoints = _dataView.getInt32(_byteOffset, _littleEndian);
 		_byteOffset+=4;
+		if (((_isVectorSprite == true) && (g_VectorSpriteVersion.version >= 2)) || (g_SWFVersion.version >= 4))
+		{
+			pSubShape.numPointColours = _dataView.getInt32(_byteOffset, _littleEndian);
+			_byteOffset+=4;
+		}
+		else
+		{
+			pSubShape.numPointColours = 0;
+		}
 		pSubShape.numLines = _dataView.getInt32(_byteOffset, _littleEndian);
 		_byteOffset+=4;
 		pSubShape.numTriangles = _dataView.getInt32(_byteOffset, _littleEndian);
@@ -448,14 +468,16 @@ yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOff
 		pSubShape.numLineTriangles = _dataView.getInt32(_byteOffset, _littleEndian);
 		_byteOffset+=4;
 		
-		if (g_SWFVersion.version >= 2) {
+		if ((_isVectorSprite == true) || (g_SWFVersion.version >= 2))
+		{
 		
 		    pSubShape.numAALines = _dataView.getInt32(_byteOffset, _littleEndian);
 		    _byteOffset+=4;
 		    pSubShape.numAAVectors = _dataView.getInt32(_byteOffset, _littleEndian);
 		    _byteOffset+=4;
 		}
-		if (g_SWFVersion.version >= 3) {
+		if ((_isVectorSprite == true) || (g_SWFVersion.version >= 3))
+		{
 		
 		    pSubShape.numLineAALines = _dataView.getInt32(_byteOffset, _littleEndian);
 			_byteOffset+=4;
@@ -464,6 +486,7 @@ yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOff
 		}
 
         pSubShape.Points = (pSubShape.numPoints > 0) ? [] : null;
+		pSubShape.PointColours = (pSubShape.numPointColours > 0) ? [] : null;
         pSubShape.Line = (pSubShape.numLines > 0) ? [] : null;
         pSubShape.Triangles = (pSubShape.numTriangles > 0) ? [] : null;
         pSubShape.LinePoints = (pSubShape.numLinePoints > 0) ? [] : null;		
@@ -475,6 +498,11 @@ yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOff
 
 		for (m = 0; m < pSubShape.numPoints*2; m++) {
 			pSubShape.Points[m] = _dataView.getFloat32(_byteOffset, _littleEndian);
+			_byteOffset+=4;
+		}
+
+		for (m = 0; m < pSubShape.numPointColours; m++) {
+			pSubShape.PointColours[m] = _dataView.getUint32(_byteOffset, _littleEndian);
 			_byteOffset+=4;
 		}
 
@@ -498,7 +526,8 @@ yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOff
 			_byteOffset+=4;
 		}
 		
-		if (g_SWFVersion.version >= 2) {
+		if ((_isVectorSprite == true) || (g_SWFVersion.version >= 2))
+		{
 		
 		    for (m = 0; m < pSubShape.numAALines*2; m++) {
 		        pSubShape.AALines[m] = _dataView.getInt32(_byteOffset, _littleEndian);
@@ -510,7 +539,8 @@ yySWFShape.prototype.BuildSubShapes = function (_styleGroup, _dataView, _byteOff
 		    }
 		}
 		
-		if (g_SWFVersion.version >= 3) {
+		if ((_isVectorSprite == true) || (g_SWFVersion.version >= 3))
+		{
 		
 		    for (m = 0; m < pSubShape.numLineAALines*2; m++) {
 				pSubShape.LineAALines[m] = _dataView.getInt32(_byteOffset, _littleEndian);

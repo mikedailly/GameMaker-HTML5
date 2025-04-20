@@ -1401,7 +1401,7 @@ function ptr(_x) {
     return ret;
 }
 
-function handle( _s )
+function handle_parse( _s )
 {
     var ret = undefined;
     if ((typeof _s == "string" ) && _s.startsWith("ref ")) {
@@ -1410,12 +1410,43 @@ function handle( _s )
         var indexOfSpace = _s.indexOf( " ", 4 );
         var handleTypeString = _s.substring( 4, indexOfSpace );
 
-        // get the index of the handle
-        var numberString = _s.substring(indexOfSpace+1);
-        var handleIndex = Number(numberString);
-
         // convert the handleTypeString to the Reference type
         var type = Name2Ref( handleTypeString );
+
+        // get the index of the handle
+        var numberString = _s.substring(indexOfSpace+1).trimStart();
+        var handleIndex = parseInt(numberString);
+        // failed conversion to a number so could be a string
+        if (Number.isNaN(handleIndex) && ((type & 0xff000000)==REFCAT_RESOURCE)) {
+
+
+            // convert the resource name to a string
+            var resInfo = ResourceGetTypeIndex( numberString );
+            handleIndex = (resInfo.type == (type&0x00ffffff)) ? resInfo.id : -1;
+
+            // check to see if the name is a builtin script
+            if ((handleIndex == -1) && (type == REFID_SCRIPT)) {
+
+                var funcRef = "";
+                if (typeof g_var2obf !== "undefined") {
+                    funcRef=window[ g_var2obf[numberString] ];
+                } // end if
+                else {
+                    funcRef=window[ numberString ];
+                } // end else
+
+                if (typeof funcRef == "function") {
+                    global_scripts_init();
+                    if (funcRef.__yy_scriptIndex != undefined)
+                        handleIndex = funcRef.__yy_scriptIndex;
+                    else
+                        return funcRef;
+                } // end if
+
+            } // end if
+
+        } // end if
+
 
         // get the reference type
         ret = MAKE_REF( type, handleIndex );
@@ -1653,9 +1684,12 @@ function yyCompareVal(_val1, _val2, _prec, _showError) {
     else if ((typeof _val1 == "number") && (typeof _val2 == "number")) {
         var f = _val1 - _val2;
         if (Number.isNaN(f)) {
-            f = (_val1 == _val2) ? 0 : f;
+            f = (!Number.isNaN(_val1) && !Number.isFinite(_val1) && !Number.isNaN(_val2) && !Number.isFinite(_val2)) ? 0 : f;
         } // end if
-        ret = abs(f) <= _prec ? 0 : (f < 0.0) ? -1 : 1;
+        if (Number.isNaN(f))
+            ret = -2;
+        else
+            ret = abs(f) <= _prec ? 0 : (f < 0.0) ? -1 : 1;
     } // end if
     else if (typeof _val1 == "string" && typeof _val2 == "string")
     {
@@ -1765,18 +1799,22 @@ function yyCompareVal(_val1, _val2, _prec, _showError) {
         if (ret === undefined) {
             if ((typeof _val1 == "number") && (typeof _val2 == "number")) {
                 var f = _val1 - _val2;
-                if (Number.isNaN(f)) {
-                    f = (_val1 == _val2) ? 0 : f;
-                }
-                ret = abs(f) <= _prec ? 0 : (f < 0.0) ? -1 : 1;
-            } // end if
-            else {            
-                ret = 1;
-                if (typeof _val1 == "number") {
-                    ret = -1;
                 } // end if
-            }  // end else
+            if (Number.isNaN(f)) {
+                f = (!Number.isNaN(_val1) && !Number.isFinite(_val1) && !Number.isNaN(_val2) && !Number.isFinite(_val2)) ? 0 : f;
+            } // end if
+            if (Number.isNaN(f))
+                ret = -2;
+            else
+                ret = Math.abs(f) <= _prec ? 0 : (f < 0.0) ? -1 : 1;
         } // end if
+        else 
+        if (ret != -2) {            
+            ret = 1;
+            if (typeof _val1 == "number") {
+                ret = -1;
+            } // end if
+        }  // end else
     }  // end if
     return ret;
 }
@@ -2018,11 +2056,7 @@ function yyfdiv(_val1, _val2) {
 ///			</returns>
 // #############################################################################################
 function yyfnotequal(_val1, _val2) {
-    var ret = yyCompareVal(_val1, _val2, g_GMLMathEpsilon, false);
-    //if (Number.isNaN(ret)) {
-    //    yyError( "unable to compare " + string(_val1) + " to " + string(_val2));
-    //} // end if
-    return ret != 0;
+    return !yyfequal(_val1, _val2);
 }
 
 // #############################################################################################
@@ -2038,9 +2072,6 @@ function yyfnotequal(_val1, _val2) {
 // #############################################################################################
 function yyfequal(_val1, _val2) {
     var ret = yyCompareVal(_val1, _val2, g_GMLMathEpsilon, false);
-    //if (Number.isNaN(ret)) {
-    //    yyError( "unable to compare " + string(_val1) + " to " + string(_val2));
-    //} // end if
     return ret == 0;
 }
 

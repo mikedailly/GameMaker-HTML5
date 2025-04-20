@@ -22,17 +22,16 @@ function HTTP_onload(_xmlhttp, _pFile) {
     if ((_xmlhttp.status < 200) || (_xmlhttp.status >= 300))
 	{
 		_pFile.m_Status = ASYNC_WEB_STATUS_ERROR;
-		_pFile.m_Data = "";
-	}
-	else {
+	} else {
 	    _pFile.m_Status = ASYNC_WEB_STATUS_LOADED;
-	    try {
-	        // If the responseType was changed to 'arraybuffer' this assignment will fail and trigger an exception
-	        _pFile.m_Data = _xmlhttp.responseText;
-	    }
-	    catch (e) {
-	        _pFile.m_Data = "";
-	    }
+	}
+
+	try {
+		// If the responseType was changed to 'arraybuffer' this assignment will fail and trigger an exception
+		_pFile.m_Data = _xmlhttp.responseText;
+	}
+	catch (e) {
+		_pFile.m_Data = "";
 	}
 }
 
@@ -510,4 +509,27 @@ function http_set_request_crossorigin(_crossOriginType)
 function http_get_request_crossorigin()
 {
 	return g_HttpRequestCrossOriginType;
+}
+
+function http_set_connect_timeout(_connectTimeoutMs)
+{
+	/* NOTE: This is ignored in the HTML5 runner because there doesn't appear to be a way to
+	 * specify a timeout for the connection/handshaking part of a HTTP request.
+	 *
+	 * The XMLHttpRequest 'timeout' member enforces a maximum length of request, so it can't be
+	 * used to enforce a quick failure in the "server is down case" without also preventing any
+	 * kind of long-running request (e.g. downloading a big file).
+	*/
+
+	g_HttpConnectTimeoutMs = yyGetInt32(_connectTimeoutMs);
+
+	if(g_HttpConnectTimeoutMs <= 0)
+	{
+		g_HttpConnectTimeoutMs = 1;
+	}
+}
+
+function http_get_connect_timeout()
+{
+	return g_HttpConnectTimeoutMs;
 }

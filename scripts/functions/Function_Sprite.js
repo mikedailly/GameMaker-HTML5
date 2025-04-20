@@ -34,6 +34,7 @@ var		MASK_PRECISE   = 0,
 function    sprite_exists( _index )
 {
 	// @if feature("sprites")
+	if (_index === undefined) return false;
 	return g_pSpriteManager.Get(yyGetInt32(_index)) != null;
 	// @else
 	return false;
@@ -304,10 +305,27 @@ function    sprite_set_bbox( _index, _left, _top, _right, _bottom )
 {
     var pSpr = g_pSpriteManager.Get(yyGetInt32(_index));
     if( pSpr===null) return;
-    pSpr.bbox.left = yyGetInt32(_left);
-    pSpr.bbox.top  = yyGetInt32(_top);
-    pSpr.bbox.right = yyGetInt32(_right);
-    pSpr.bbox.bottom = yyGetInt32(_bottom);
+
+	var left = yyGetInt32(_left);
+	var right = yyGetInt32(_right);
+	var top = yyGetInt32(_top);
+	var bottom = yyGetInt32(_bottom);
+
+	var maskupdate_needed = false;
+
+	if(pSpr.bbox.left != left || pSpr.bbox.right!=right || pSpr.bbox.top!=top || pSpr.bbox.bottom!=bottom)
+		maskupdate_needed = true;
+
+    pSpr.bbox.left = left;
+    pSpr.bbox.top  = top;
+    pSpr.bbox.right = right;
+    pSpr.bbox.bottom = bottom;
+
+	if(maskupdate_needed)
+	{
+		pSpr.CreateMask();
+		pSpr.MarkInstancesAsDirty();
+	}
 }
 
 // #############################################################################################
@@ -332,6 +350,7 @@ function sprite_set_bbox_mode( _index, _mode )
 	if ( _mode == pSpr.bboxmode ) return;
 
 	pSpr.bboxmode = _mode;
+	pSpr.MarkInstancesAsDirty();
 }
 
 
@@ -633,7 +652,7 @@ compile_if_used(sprite_add_from_surface = sprite_add_from_surface_RELEASE);
 ///			 </returns>
 // #############################################################################################
 function sprite_delete( _ind ) {
-	g_pSpriteManager.Delete(yyGetInt32(_ind));
+	return g_pSpriteManager.Delete(yyGetInt32(_ind));
 }
 
 
@@ -1152,119 +1171,113 @@ function sprite_collision_mask( _ind, _sepmasks, _bbmode,_bbleft,_bbtop,_bbright
     if( pSpr===null) { return false; }
     pSpr.colcheck = yySprite_CollisionType.PRECISE;
 
-    // Clean up if required
-    pSpr.colmask = [];
-    pSpr.sepmasks = yyGetInt32(_sepmasks);
+	_sepmasks   = yyGetInt32(_sepmasks);
+	_bbmode     = yyGetInt32(_bbmode);
+	_bbleft     = yyGetInt32(_bbleft);
+	_bbright    = yyGetInt32(_bbright);
+	_bbtop      = yyGetInt32(_bbtop);
+	_bbbottom   = yyGetInt32(_bbbottom);
+	_kind       = yyGetInt32(_kind);
+	_tolerance  = yyGetInt32(_tolerance);
 
-    // Check whether there are any images
-    pSpr.bbox = new YYRECT();
-    if (pSpr.numb == 0)
-    { 
-        return;
-    }
+	var bbox = new YYRECT();
+	bbox.left    = _bbleft;
+	bbox.right   = _bbright;
+	bbox.top     = _bbtop;
+	bbox.bottom  = _bbbottom;
 
-    _bbmode = yyGetInt32(_bbmode);
-    _kind = yyGetInt32(_kind);
-    _tolerance = yyGetInt32(_tolerance);
-
-    pSpr.bboxmode = _bbmode;
-
-	// Create the bounding box
-    if (_bbmode == 0)
-    {
-		// precise mode (should really look at the mask and get the bounds...)
-		var lleft = 100000;
-		var rright = -100000;
-		var ttop = 100000;
-		var bbottom  = -100000; 
-		
-		
-		for (var i = 0; i < pSpr.numb; i++)
-  		{
-  		    var _pTPE = pSpr.ppTPE[i];
-  		    var pByteData = Graphics_ExtractImageBytes(_pTPE);
-		    var index = 0;
-		    for (var k = 0; k < _pTPE.oh; k++)
-		    {
-		        for (var j = 0; j < _pTPE.ow; j++)
-		        {
-		            var index =((k*_pTPE.ow +j)*4)+3;
-		            if(index<pByteData.length)
-		            {
-			            if (pByteData[index] > _tolerance) 
-			            {
-			                if(j<lleft)
-			                    lleft = j;
-			                if(j>rright)
-			                    rright = j;
-			                if(k<ttop)
-			                    ttop = k;
-			                if(k>bbottom)
-			                    bbottom = k;
-			            }
-			        }
-			    }		    
-		    }
-  		}
-  		if(lleft==0x7FFFFFFF) //No valid pixels
-  		{
-  		    pSpr.bbox.left = 0;
-		    pSpr.bbox.right =0;
-		    pSpr.bbox.top = 0;
-		    pSpr.bbox.bottom = 0;
-  		}
-  		else
-  		{
-  		    pSpr.bbox.left = lleft;
-		    pSpr.bbox.right =rright;
-		    pSpr.bbox.top = ttop;
-		    pSpr.bbox.bottom = bbottom;
-  		}	
-	} else if (_bbmode == 1)
+	if(pSpr.m_skeletonSprite)
 	{
-		// full image
-		pSpr.bbox.left = 0;
-		pSpr.bbox.right = pSpr.width;
-		pSpr.bbox.top = 0;
-		pSpr.bbox.bottom = pSpr.height;
-	} else
-	{
-		// user defined mode
-		pSpr.bbox.left = yyGetInt32(_bbleft);
-		pSpr.bbox.right = yyGetInt32(_bbright);
-		pSpr.bbox.top = yyGetInt32(_bbtop);
-		pSpr.bbox.bottom = yyGetInt32(_bbbottom); 	
+		if(_bbmode != 1 && _bbmode != 2)
+		{
+			yyError("sprite_collision_mask: bboxmode must be bboxmode_fullimage or bboxmode_manual for Spine sprites");
+			return;
+		}
+
+		if (_kind != 1 && _kind != 4)
+		{
+			yyError("sprite_collision_mask: kind must be bboxkind_rectangular or bboxkind_spine for Spine sprites");
+			return;
+		}
+
+		pSpr.SetBoundingBoxMode(_bbmode);
+		pSpr.SetBoundingBox(bbox);  /* will no-op if _bbmode != bboxmode_manual */
+		pSpr.ComputeBoundingBox();  /* will no-ip if _bbmode == bboxmode_manual */
+
+		if (_kind == 1)
+		{
+			/* bboxkind_rectangular */
+			pSpr.colcheck = yySprite_CollisionType.AXIS_ALIGNED_RECT;
+		}
+		else if (_kind == 4)
+		{
+			/* bboxkind_spine */
+			pSpr.colcheck = yySprite_CollisionType.SPINE_MESH;
+		}
+
+		pSpr.MarkInstancesAsDirty();
 	}
+	else{
+		if(_kind == 4)
+		{
+			yyError("sprite_collision_mask: kind cannot be bboxkind_spine for bitmap sprites");
+		}
 
+		// Clean up if required
+		pSpr.colmask = [];
+		pSpr.sepmasks = _sepmasks;
 
-    // if bounding box mode, then don't assign sprites, just fill in the bounding box.
-    //if( _kind==1 ){
-    //}
+		// Check whether there are any images
+		pSpr.bbox = new YYRECT();
+		if (pSpr.numb == 0)
+		{
+			return;
+		}
 
+		pSpr.SetBoundingBoxMode(_bbmode);
+		pSpr.SetBoundingBox(bbox); /* will no-op if _bbmode != bboxmode_manual */
 
-    // Compute the mask(s)
-    var ppTPE = pSpr.ppTPE;
-    pSpr.colmask = [];
-    if(pSpr.sepmasks)
-    {
-    	for (var i = 0; i < pSpr.numb; i++)
-    	{
-    		pSpr.colmask[i] = TMaskCreate(null, pSpr.ppTPE[i], _bbmode, pSpr.bbox, _kind, _tolerance);
-        }
-    }
-    else
-    {
-        // If not separate masks, then OR them altogether. 
-    	pSpr.colmask[0] = TMaskCreate(pSpr.colmask[0], pSpr.ppTPE[0], _bbmode, pSpr.bbox, _kind, _tolerance);
-    
-        for (var i=1;i < pSpr.numb; i++){
-        	pSpr.colmask[0] = TMaskCreate(pSpr.colmask[0], pSpr.ppTPE[i], _bbmode, pSpr.bbox, _kind, _tolerance);
-        }
-    }
-    pSpr.maskcreated = true;   	    
+		// if bounding box mode, then don't assign sprites, just fill in the bounding box.
+
+		if (_kind != MASK_RECTANGLE)
+		{
+			// Compute the mask(s)
+			var ppTPE = pSpr.ppTPE;
+			pSpr.colmask = [];
+			if(pSpr.sepmasks)
+			{
+				for (var i = 0; i < pSpr.numb; i++)
+				{
+					pSpr.colmask[i] = TMaskCreate(null, pSpr.ppTPE[i], _bbmode, pSpr.bbox, _kind, _tolerance);
+				}
+			}
+			else
+			{
+				// If not separate masks, then OR them altogether.
+				pSpr.colmask[0] = TMaskCreate(pSpr.colmask[0], pSpr.ppTPE[0], _bbmode, pSpr.bbox, _kind, _tolerance);
+
+				for (var i=1;i < pSpr.numb; i++){
+					pSpr.colmask[0] = TMaskCreate(pSpr.colmask[0], pSpr.ppTPE[i], _bbmode, pSpr.bbox, _kind, _tolerance);
+				}
+			}
+			pSpr.maskcreated = true;
+		}
+	}
 }
      
+function SetColMaskBit(u, v, mwidth,pMaskData,length)
+{
 
+	var byteindex = u >> 3;
+	var bitindex = u & 0x7;
+	var finalindex = mwidth * v + byteindex;
+
+
+	if(finalindex<length) //Just a bit of protection in case the ellipse or diamond try to write outside the size of the array
+		pMaskData[finalindex] |= 1 << (7 - bitindex);
+
+
+}
 
 // #############################################################################################
 /// Function:<summary>
@@ -1286,8 +1299,12 @@ function TMaskCreate(_merge, _pTPE, _bbmode, _bbox, _kind, _tolerance)
 	var w = _pTPE.ow;
 	var h = _pTPE.oh;
 
+	var bwidth = _bbox.right - _bbox.left + 1; 
+	var mwidth = (bwidth + 7) >> 3; 
+	var ht = _bbox.bottom - _bbox.top + 1; 
+
 	// get the image bytes
-	var wh = h * w;
+	var wh = ht * mwidth;
 	var pData = new Uint8Array(wh);
 	for(var j=0;j<wh;j++) pData[j] = false;	// clear the array
 
@@ -1296,29 +1313,33 @@ function TMaskCreate(_merge, _pTPE, _bbmode, _bbox, _kind, _tolerance)
 	{
 		var pByteData = Graphics_ExtractImageBytes(_pTPE);
 		var index = 0;
-		for (var i = 0; i < pByteData.length; i+=4)
+
+
+		var validlength = pByteData.length ;
+		
+		for (var k = 0; k <= ht - 1; k++)
 		{
-			if (pByteData[i + 3] > _tolerance) {
-			    pData[index] = true; 
+			for (var j = 0; j < mwidth; j++)
+			{
+				var targ = 0;
+				var baseindex = 4*(((k + _bbox.top) * w) + _bbox.left+(j  ) * 8)+3;
+				if ((baseindex + 0 < validlength) && (pByteData[baseindex + 0*4] )>_tolerance )targ |= (1 << 7);
+				if ((baseindex + 1 < validlength) && (pByteData[baseindex + 1*4] )>_tolerance )targ |= (1 << 6);
+				if ((baseindex + 2 < validlength) && (pByteData[baseindex + 2*4] )>_tolerance )targ |= (1 << 5);
+				if ((baseindex + 3 < validlength) && (pByteData[baseindex + 3*4] )>_tolerance )targ |= (1 << 4);
+				if ((baseindex + 4 < validlength) && (pByteData[baseindex + 4*4] )>_tolerance )targ |= (1 << 3);
+				if ((baseindex + 5 < validlength) && (pByteData[baseindex + 5*4] )>_tolerance )targ |= (1 << 2);
+				if ((baseindex + 6 < validlength) && (pByteData[baseindex + 6*4] )>_tolerance )targ |= (1 << 1);
+				if ((baseindex + 7 < validlength) && (pByteData[baseindex + 7*4] )>_tolerance )targ |= (1 << 0);
+
+				pData[j + (k * mwidth)] = targ;
 			}
-			else {
-			    pData[index] = false;
-			}
-			index++;
 		}
 	}
 	else {
 		// Create the mask 
 		switch (_kind)
 		{
-			case MASK_RECTANGLE:		{
-											for(var y=_bbox.top;y<=_bbox.bottom;y++){
-												for(var x=_bbox.left;x<=_bbox.right;x++){
-													pData[x+(y*w)] = true;
-												}
-											}
-											break;
-										}
 
 			case MASK_ELLIPSE:		{
 											var mx = (_bbox.left + _bbox.right) / 2;
@@ -1329,7 +1350,8 @@ function TMaskCreate(_merge, _pTPE, _bbmode, _bbox, _kind, _tolerance)
 											for(var y=_bbox.top;y<=_bbox.bottom;y++){
 												for(var x=_bbox.left;x<=_bbox.right;x++){
 													if( (dx > 0) && (dy > 0) ) {
-														pData[x+(y*w)] = sqr( (x-mx)/dx) + sqr( (y-my)/dy ) < 1;
+														if(sqr( (x-mx)/dx) + sqr( (y-my)/dy ) < 1)
+															SetColMaskBit(x-_bbox.left, y-_bbox.top, mwidth, pData, wh);
 													}
 												}
 											}
@@ -1345,7 +1367,8 @@ function TMaskCreate(_merge, _pTPE, _bbmode, _bbox, _kind, _tolerance)
 											for(var y=_bbox.top;y<=_bbox.bottom;y++){
 												for(var x=_bbox.left;x<=_bbox.right;x++){
 													if( (dx > 0) && (dy > 0) ) {
-														pData[x+(y*w)] = Math.abs((x-mx)/dx) + Math.abs((y-my)/dy) < 1;
+														if(Math.abs((x-mx)/dx) + Math.abs((y-my)/dy) < 1)
+															SetColMaskBit(x-_bbox.left, y-_bbox.top, mwidth, pData, wh);
 													}
 												}
 											}
@@ -1551,7 +1574,7 @@ function sprite_get_uvs(_spriteIndex, _frameIndex)
 	    
 	    var arrayData = [];
 	    arrayData.push(pTPE.x*oneTexelW, pTPE.y*oneTexelH, (pTPE.x+pTPE.CropWidth)*oneTexelW, (pTPE.y+pTPE.CropHeight)*oneTexelH);
-	    arrayData.push(pTPE.XOffset, pTPE.YOffset, pTPE.CropWidth/pTPE.ow,pTPE.CropHeight/pTPE.ow );
+	    arrayData.push(pTPE.XOffset, pTPE.YOffset, pTPE.CropWidth/pTPE.ow,pTPE.CropHeight/pTPE.oh );
 
 	    return arrayData;
     }

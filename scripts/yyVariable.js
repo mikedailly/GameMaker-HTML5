@@ -148,6 +148,7 @@ function GMLObject()
     // do nothing just now
     this.__type = "Object";
     this.__yyIsGMLObject = true;
+
 } // end GMLObject
 
 GMLObject.prototype.toString = function () {
@@ -156,16 +157,24 @@ GMLObject.prototype.toString = function () {
 
 GMLObject.prototype.SetImageIndexGML = function(_frame) 
 { 
-    this.image_index = _frame; 
+    this.gmlimage_index = _frame; 
+
+    function getImageIndex() { return this.gmlimage_index; }
+    function setImageIndex(f) { this.gmlimage_index = f; }
+    
+    Object.defineProperties( this, {
+        image_index : { get : getImageIndex, set : setImageIndex, enumerable : true, configurable : false}
+    });
 };
 
 
 function __yy_gml_object_create( _self, _a )
 {
     var r = new GMLObject();
+    r.__yyCreatedByNew = 1;
     var args = [];
     args[0] = r;
-    args[1] = _self;
+    args[1] = _a.boundObject ? _a.boundObject : _self;
     for( var n=2; n<arguments.length; ++n) {
         args[n] = arguments[n];
     } // end for
@@ -203,7 +212,7 @@ function is_callable( _v )
     }
 
     // Check if a script was found
-    return _v != undefined;
+    return is_method(_v);
 }
 
 function is_handle( _v )
@@ -212,7 +221,7 @@ function is_handle( _v )
 }
 
 
-function __yyg_call_method( _func )
+function __yyg_call_method( _func, _self, _other )
 {
     switch( typeof(_func) )
     {
@@ -244,7 +253,8 @@ function __yy_method( _inst, _func )
     } else {
         var a = { func : _func, inst : _inst };
         var newfunc = function() {
-            var newArgs = Array.prototype.slice.call(arguments);        
+            var newArgs = Array.prototype.slice.call(arguments);    
+            newArgs[1] = newArgs[0];   
             newArgs[0] = this.inst;
             return this.func.apply(null, newArgs);
         };
@@ -279,6 +289,7 @@ function method( _inst, _func )
             var a = { func : _func, inst : _inst };
             var newfunc = function() {
                 var newArgs = Array.prototype.slice.call(arguments);
+                newArgs[1] = newArgs[0];   
                 newArgs[0] = this.inst;
                 return this.func.apply(null, newArgs);
             };        
@@ -305,7 +316,7 @@ function method( _inst, _func )
                     // delete the other
                     newArgs.splice(1,1);
                     return this.func.apply(null, newArgs);
-                };                
+                };
             }
             else {
                 newfunc = function() {
@@ -411,7 +422,7 @@ function method_get_index( _method )
         var globalScriptIndex = g_globalScripts.indexOf(_method);
         if(globalScriptIndex != -1)
         {
-            return globalScriptIndex + 100000;
+            return globalScriptIndex;
         }
     } // end if
     return undefined;
@@ -740,7 +751,7 @@ function array_delete( _array, _index, _number )
     } // end else
 } // end array_delete
 
-function array_sort( _array, _typeofSort )
+function array_sort( _selfinst, _array, _typeofSort )
 {
     if (Array.isArray(_array)) {
 
@@ -752,12 +763,7 @@ function array_sort( _array, _typeofSort )
             case "number":
                 var func = JSON_game.Scripts[_typeofSort - 100000];
                 var obj;
-                if ( "boundObject" in func) {
-                    obj = func.boundObject;
-                } // end if
-                else {
-                    obj = {};
-                } // end else
+                obj = func.boundObject ?? _selfinst;
                 _array.sort(function(a,b) { return func( obj, obj, a, b); } );
                 break;
             default:
@@ -789,7 +795,7 @@ const shuffleArray = (_array, _offset, _length) => {
 function array_shuffle( _array, _offset, _length )
 {
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _array.length; 
 
     var ret = undefined;
@@ -820,7 +826,7 @@ function array_shuffle( _array, _offset, _length )
 function array_shuffle_ext(_array, _offset, _length)
 {
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _array.length; 
 
     var ret = undefined;
@@ -867,14 +873,14 @@ function array_last(_array) {
     return _length == 0 ? undefined : _array[_length -1];
 } // end array_last
 
-function array_create_ext(_size, _func) {
+function array_create_ext(_selfinst, _size, _func) {
 
     // Check size argument
     _size = _size === undefined ? 0 : yyGetReal(_size);
     
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     var ret = new Array(_size);
     for (var i = 0; i < _size; i++) {
@@ -885,17 +891,17 @@ function array_create_ext(_size, _func) {
     return ret;
 } // end array_create_ext
 
-function array_find_index(_array, _func, _offset, _length) {
+function array_find_index(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_find_index : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -925,7 +931,7 @@ function array_get_index(_array, _value, _offset, _length) {
     if (!Array.isArray(_array)) yyError("array_get_index : argument0 is not an array");
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -956,7 +962,7 @@ function array_contains(_array, _value, _offset, _length) {
     if (!Array.isArray(_array)) yyError("array_contains : argument0 is not an array");
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -995,8 +1001,8 @@ function array_contains_ext(_array, _values, _matchAll, _offset, _length) {
     if (subArrayLength == 0) return true;
 
     // Check raw offset and length
-    _matchAll = _offset = arguments.length > 2 ? yyGetBool(_matchAll) : false;
-    _offset = arguments.length > 3 ? yyGetReal(_offset) : 0;
+    _matchAll = _matchAll != undefined ? yyGetBool(_matchAll) : false;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 4 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1041,17 +1047,17 @@ function array_contains_ext(_array, _values, _matchAll, _offset, _length) {
     return false;
 } // end array_contains_ext
 
-function array_any(_array, _func, _offset, _length) {
+function array_any(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_any : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1077,17 +1083,17 @@ function array_any(_array, _func, _offset, _length) {
     return false;
 } // end array_any
 
-function array_all(_array, _func, _offset, _length) {
+function array_all(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_all : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1113,18 +1119,18 @@ function array_all(_array, _func, _offset, _length) {
     return true;
 } // end array_all
 
-function array_foreach(_array, _func, _offset, _length) {
+function array_foreach(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_foreach : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
-    _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
+    _length = arguments.length > 5 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
     _itValues = computeIterationValues(_array.length, _offset, _length); // [offset, loops, step]
@@ -1144,17 +1150,17 @@ function array_foreach(_array, _func, _offset, _length) {
     }
 } // end array_foreach
 
-function array_reduce(_array, _func, _init, _offset, _length) {
+function array_reduce(_selfinst, _array, _func, _init, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_reduce : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 3 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 4 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1185,17 +1191,17 @@ function array_reduce(_array, _func, _init, _offset, _length) {
     return _init;
 } // end array_reduce
 
-function array_filter(_array, _func, _offset, _length) {
+function array_filter(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_filter : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1224,17 +1230,17 @@ function array_filter(_array, _func, _offset, _length) {
     return _ret;
 } // end array_filter
 
-function array_filter_ext(_array, _func, _offset, _length) {
+function array_filter_ext(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_filter_ext : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1264,17 +1270,17 @@ function array_filter_ext(_array, _func, _offset, _length) {
     return _ret;
 } // end array_filter_ext
 
-function array_map(_array, _func, _offset, _length) {
+function array_map(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_map : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1301,17 +1307,17 @@ function array_map(_array, _func, _offset, _length) {
     return _ret;
 } // end array_map
 
-function array_map_ext(_array, _func, _offset, _length) {
+function array_map_ext(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_map_ext : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1338,17 +1344,17 @@ function array_map_ext(_array, _func, _offset, _length) {
     return _ret;
 } // end array_map_ext
 
-function array_copy_while(_array, _func, _offset, _length) {
+function array_copy_while(_selfinst, _array, _func, _offset, _length) {
 
     // Check array argument
     if (!Array.isArray(_array)) yyError("array_copy_while : argument0 is not an array");
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1384,7 +1390,7 @@ function array_unique(_array, _offset, _length) {
     if (!Array.isArray(_array)) yyError("array_unique : argument0 is not an array");
 
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1418,7 +1424,7 @@ function array_unique_ext(_array, _offset, _length) {
     if (!Array.isArray(_array)) yyError("array_unique_ext : argument0 is not an array");
 
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1454,7 +1460,7 @@ function array_reverse(_array, _offset, _length) {
     if (!Array.isArray(_array)) yyError("array_reverse : argument0 is not an array");
 
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -1487,7 +1493,7 @@ function array_reverse_ext(_array, _offset, _length) {
     if (!Array.isArray(_array)) yyError("array_reverse_ext : argument0 is not an array");
 
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _array.length; 
 
     // Compute raw values into valid/clamped values
@@ -2193,14 +2199,19 @@ function variable_instance_get(_id, _var) {
             var pInst = pObj[inst];			
             if (pInst.__yyIsGMLObject || (!pInst.marked && pInst.active)) {               
                 var settings = undefined;
-                if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
-                    ret = g_instance_names[ g_var2obf[_var] ];
+                if ((typeof g_var2obf !== "undefined") && g_var2obf.hasOwnProperty(_var) && (g_var2obf[_var] != undefined)) {
+                    var nm = g_var2obf[_var];
+                    if (g_instance_names.hasOwnProperty(nm)) {
+                        settings = g_instance_names[ nm ];
+                    } // end if
                 } else {
-                    settings = g_instance_names[ _var ];
+                    if (g_instance_names.hasOwnProperty(_var)) {
+                        settings = g_instance_names[ _var ];
+                    } // end if
                 } // end else
                 if (settings == undefined) {
                     var nm;
-                    if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
+                    if ((typeof g_var2obf !== "undefined") && g_var2obf.hasOwnProperty(_var) && (g_var2obf[_var] != undefined)) {
                         nm = g_var2obf[_var];
                         if (pInst[ nm ] == undefined) {
                             nm = "gml"+_var;
@@ -2276,14 +2287,19 @@ function variable_instance_set(_id, _var, _val) {
 			var pInst = pObj[inst];			
 			if (pInst.__yyIsGMLObject || (!pInst.marked && pInst.active)) {
                 var settings = undefined;
-                if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
-                    settings = g_instance_names[g_var2obf[_var]];
+                if ((typeof g_var2obf !== "undefined") && g_var2obf.hasOwnProperty(_var)&& (g_var2obf[_var] != undefined)) {
+                    var nm = g_var2obf[_var];
+                    if (g_instance_names.hasOwnProperty(nm)) {
+                        settings = g_instance_names[ nm ];
+                    } // end if
                 } else {
-                    settings = g_instance_names[ _var ];
+                    if (g_instance_names.hasOwnProperty(_var)) {
+                        settings = g_instance_names[ _var ];
+                    } // end if
                 } // end else
                 if (settings == undefined) {
 
-                    if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
+                    if ((typeof g_var2obf !== "undefined") && g_var2obf.hasOwnProperty(_var) && (g_var2obf[_var] != undefined)) {
                         pInst[ g_var2obf[_var] ] = _val;
                     }
                     else {
@@ -2342,14 +2358,19 @@ function variable_instance_set_post(_id, _var, _val) {
             var pInst = pObj[inst];         
             if (pInst.__yyIsGMLObject || (!pInst.marked && pInst.active)) {
                 var settings = undefined;
-                if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
-                    ret = g_instance_names[g_var2obf[_var]]; //doesn't do anything with ret - not sure what this is supposed to be doing but looks wrong
+                if ((typeof g_var2obf !== "undefined") && g_var2obf.hasOwnProperty(_var) && (g_var2obf[_var] != undefined)) {
+                    var nm = g_var2obf[_var];
+                    if (g_instance_names.hasOwnProperty(nm)) {
+                        settings = g_instance_names[ nm ];
+                    } // end if
                 } else {
-                    settings = g_instance_names[ _var ];
+                    if (g_instance_names.hasOwnProperty(_var)) {
+                        settings = g_instance_names[ _var ];
+                    } // end if
                 } // end else
                 if (settings == undefined) {
 
-                    if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
+                    if ((typeof g_var2obf !== "undefined") && g_var2obf.hasOwnProperty(_var)&& (g_var2obf[_var] != undefined)) {
                         ret = pInst[ g_var2obf[_var] ];
                         pInst[ g_var2obf[_var] ] = _val;
                     }
@@ -2434,9 +2455,15 @@ function variable_instance_exists(_id, _var) {
             if (pInst.__yyIsGMLObject || (!pInst.marked && pInst.active)) {
                 var settings = undefined;
                 if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
-                    settings = g_instance_names[ g_var2obf[_var] ];
+                    var nm = g_var2obf[_var];
+                    if (g_instance_names.hasOwnProperty(nm)) {
+                        settings = g_instance_names[ nm ];
+                    } // end if
                 } else {
                     settings = g_instance_names[ _var ];
+                    if (g_instance_names.hasOwnProperty(_var)) {
+                        settings = g_instance_names[ _var ];
+                    } // end if
                 } // end else
                 if (settings == undefined) {
                     if ((typeof g_var2obf !== "undefined") && (g_var2obf[_var] != undefined)) {
@@ -2735,10 +2762,10 @@ function struct_remove( _id, _var)
 } // end struct_remove
 
 // struct_foreach(id, func)
-function struct_foreach(_id, _func) {
+function struct_foreach(_selfinst, _id, _func) {
 
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     var pObj = null;
     var glob = false;
@@ -2783,6 +2810,18 @@ function struct_get_from_hash( _id, _hash) {
 function struct_set_from_hash(_id, _hash, _val) {
     return variable_instance_set( _id, _hash, _val);
 } // end struct_set_from_hash
+
+// struct_remove_from_hash(id,name)
+function struct_remove_from_hash( _id, _var)
+{
+    return variable_struct_remove( _id, _var );
+} // end struct_remove
+
+// struct_exists_from_hash(id,name)
+function struct_exists_from_hash( _id, _var)
+{
+    return variable_struct_exists( _id, _var );
+} // end struct_remove
 
 // variable_get_hash(name) : pass through
 function variable_get_hash(_name) {

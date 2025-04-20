@@ -72,8 +72,8 @@ eTT_Invisible = 1;
 eTT_Disable = 2;
 eTT_Count = 3;
 
-eSM_Loop = 0;
-eSM_Single = 1;
+eSM_Single = 0;
+eSM_Loop = 1;
 
 sRM_DirectAssign = 0;
 sRM_Lerp = 1;
@@ -2102,7 +2102,9 @@ function yySequenceBaseTrack(_pStorage) {
                     case eT_Falloff:
                         if (!isCreationTrack || !(_result.paramset.GetBit(eT_Falloff)))
                         {
-                            _result.falloff = track.evaluate(0, _head, _length);
+                            _result.falloffRef = track.evaluate(0, _head, _length);
+                            _result.falloffMax = track.evaluate(1, _head, _length);
+                            _result.falloffFactor = track.evaluate(2, _head, _length);
                             _result.paramset.SetBit(eT_Falloff);
                         }
                         break;
@@ -3894,6 +3896,8 @@ function yySequence(_pStorage) {
     this.m_volume = 1.0;
     this.m_xorigin = 0;
     this.m_yorigin = 0;
+    this.m_width = undefined;
+    this.m_height = undefined;
     this.m_messageEventKeyframeStore = new yyKeyframeStore();
     this.m_messageEventKeyframeStore.numKeyframes = 0;
     this.m_messageEventKeyframeStore.keyframes = [];
@@ -3923,6 +3927,8 @@ function yySequence(_pStorage) {
         this.m_volume = _pStorage.volume;
         this.m_xorigin = _pStorage.xorigin;
         this.m_yorigin = _pStorage.yorigin;
+        this.m_width = _pStorage.width;
+        this.m_height = _pStorage.height;
 
         // Create Message Event Keyframe Store and Keys
         this.m_messageEventKeyframeStore = new yyKeyframeStore();
@@ -5285,11 +5291,15 @@ yySequenceManager.prototype.HandleUpdateTracks = function (_el, _sequence, _inst
                     {
                         if (paramset_parentonly.GetBit(eT_Falloff))
                         {
-                            node.value.falloff = node.m_parent.value.falloff;
+                            node.value.falloffRef = node.m_parent.value.falloffRef;
+                            node.value.falloffMax = node.m_parent.value.falloffMax;
+                            node.value.falloffFactor = node.m_parent.value.falloffFactor;
                         }
                         else
                         {
-                            node.value.falloff *= node.m_parent.value.falloff;
+                            node.value.falloffRef *= node.m_parent.value.falloffRef;
+                            node.value.falloffMax *= node.m_parent.value.falloffMax;
+                            node.value.falloffFactor *= node.m_parent.value.falloffFactor;
                         }
                     }
                     if (node.value.paramset.GetBit(eT_ImageSpeed)) 
@@ -5633,7 +5643,9 @@ yySequenceManager.prototype.HandleAudioTrackUpdate = function (_pEl, _pSeq, _pIn
     // Evaluate gain and pitch with inheritance
     var gain = _srcVars.gain * _pInst.m_volume * _pSeq.m_volume;
     var pitch = _srcVars.pitch;
-    var falloff = _srcVars.falloff;
+    var falloffRef = _srcVars.falloffRef;
+    var falloffMax = _srcVars.falloffMax;
+    var falloffFac = _srcVars.falloffFactor;
 
     // Scan through all the keyframes so we can handle unexpected seeks etc. without having to track changes
 
@@ -5682,7 +5694,7 @@ yySequenceManager.prototype.HandleAudioTrackUpdate = function (_pEl, _pSeq, _pIn
                         if (pAudioInfo.soundindex != -1)
                         {
                             // See if we need to stop and restart this sound
-                            if (((pAudioInfo.playdir * _headDir) <= 0) || (((_headPos - _lastHeadPos) * pAudioInfo.playdir) <= 0))
+                            if (((pAudioInfo.playdir * _headDir) < 0) || (((_headPos - _lastHeadPos) * pAudioInfo.playdir) < 0))
                             {
                                 audio_stop_sound(pAudioInfo.soundindex);
                                 pAudioInfo.soundindex = -1;
@@ -5702,8 +5714,7 @@ yySequenceManager.prototype.HandleAudioTrackUpdate = function (_pEl, _pSeq, _pIn
 							}
 
                             pAudioInfo.playdir = _headDir;
-                            pAudioInfo.soundindex = audio_play_sound_on(pAudioInfo.emitterindex, ppChanKey.m_soundIndex, (ppChanKey.m_mode == eSM_Loop) ? true : false, 1.0);
-
+                            
                             // Seek to the correct spot in the sample (this matches the IDE logic)
                             var timefromstart;
                             if (pAudioInfo.playdir > 0)
@@ -5717,18 +5728,27 @@ yySequenceManager.prototype.HandleAudioTrackUpdate = function (_pEl, _pSeq, _pIn
                                     timefromstart = 0.0;
                             }
 
-                            if ((_pSeq.m_playbackSpeed * _pInst.speedScale) > 0.0)
+                            if ((_pSeq.m_playbackSpeed * _pInst.m_speedScale) > 0.0)
                             {
-                                timefromstart /= (_pSeq.m_playbackSpeed * _pInst.speedScale);;
+                                timefromstart /= (_pSeq.m_playbackSpeed * _pInst.m_speedScale);
                             }
-                            audio_sound_set_track_position(pAudioInfo.soundindex, timefromstart);
+
+                            const props = {
+                                "sound": ppChanKey.m_soundIndex,
+                                "loop": (ppChanKey.m_mode == eSM_Loop),
+                                "priority": 1,
+                                "emitter": pAudioInfo.emitterindex,
+                                "offset": timefromstart
+                            };
+                            audio_emitter_position(pAudioInfo.emitterindex, emitterPosX, emitterPosY, 0.0);
+                            pAudioInfo.soundindex = audio_play_sound_ext(props);
                         }
 
                         if (pAudioInfo.soundindex != -1 && audio_emitter_exists(pAudioInfo.emitterindex) === true)
                         {
-                            audio_emitter_gain(pAudioInfo.emitterindex, gain);
+                            audio_emitter_gain(pAudioInfo.emitterindex, gain, 0);
                             audio_emitter_pitch(pAudioInfo.emitterindex, pitch);
-                            //audio_emitter_falloff(pInfo.emitterindex, )
+                            audio_emitter_falloff(pAudioInfo.emitterindex, falloffRef, falloffMax, falloffFac);
 
                             audio_emitter_position(pAudioInfo.emitterindex, emitterPosX, emitterPosY, 0.0);
 
@@ -5960,6 +5980,8 @@ yySequenceManager.prototype.HandleInstanceTrackUpdate = function (_pEl, _pSeq, _
 // #############################################################################################
 yySequenceManager.prototype.HandleParticleTrackUpdate = function (_pEl, _pSeq, _pInst, _srcVars, _matrix, _pTrack, _headPos, _lastHeadPos)
 {
+    _srcVars.particleSystemID = -1;
+
     var keyframes = _pTrack.m_keyframeStore;
     var keyframeCurrent = null;
 
@@ -5974,14 +5996,50 @@ yySequenceManager.prototype.HandleParticleTrackUpdate = function (_pEl, _pSeq, _
         }
     }
 
+    g_SeqStack.push(_pTrack);
+    var hashid = CHashMapCalculateHash(g_SeqStack);
+    g_SeqStack.pop();
+
+	var particleInfo = _pInst.trackParticles[hashid];
+
+	// Destroy particle system if key changed
+	if (particleInfo
+		&& particleInfo.particleSystemID != -1
+		&& particleInfo.pKeydata != keyframeCurrent)
+	{
+		ParticleSystem_Destroy(particleInfo.particleSystemID);
+		particleInfo.particleSystemID = -1;
+	}
+
     // Update particle system (if any)
     if (keyframeCurrent)
     {
-        var particleSystem = _pInst.m_trackIDToPS[_pTrack.id];
-        var ps = (particleSystem !== undefined) ? particleSystem : -1;
+		var ps = -1;
+
+		if (keyframeCurrent.particleSystemIndex != -1)
+		{
+			if (!particleInfo)
+			{
+				particleInfo = new CSeqTrackParticleInfo();
+				_pInst.trackParticles[hashid] = particleInfo;
+			}
+
+			if (particleInfo.particleSystemID == -1)
+			{
+				ps = CParticleSystem.Get(keyframeCurrent.particleSystemIndex).MakeInstance();
+				ParticleSystem_AutomaticDraw(ps, false);
+				ParticleSystem_AutomaticUpdate(ps, false);
+				particleInfo.particleSystemID = ps;
+			}
+
+			ps = particleInfo.particleSystemID;
+			particleInfo.pKeydata = keyframeCurrent;
+		}
 
         if (ps != -1)
         {
+            _srcVars.particleSystemID = ps;
+
             ParticleSystem_SetMatrix(ps, _matrix);
 
             // Re-burst emitters when the sequence loops
@@ -6123,9 +6181,7 @@ function CSequenceInstance(_id)
 
     this.trackAudio = {}; //CSeqTrackAudioInfo
     this.trackInstances = {}; //CSeqTrackInstanceInfo
-
-    this.m_trackIDToPS = {};
-    this.m_trackIDToLastKeyframe = {};
+    this.trackParticles = {}; //CSeqTrackParticleInfo
     
     this.cachedElementID = -1;
 
@@ -6704,16 +6760,15 @@ CSequenceInstance.prototype.CleanupAudioEmitters = function ()
 CSequenceInstance.prototype.CleanupParticles = function ()
 {
     // Destroy particle systems created by the layer
-    for (var k in this.m_trackIDToPS)
+    for (var k in this.trackParticles)
     {
-        var ps = this.m_trackIDToPS[k];
+        var ps = this.trackParticles[k].particleSystemID;
         if (ps != -1)
         {
             ParticleSystem_Destroy(ps);
         }
     }
-    this.m_trackIDToPS = {};
-    this.m_trackIDToLastKeyframe = {};
+    this.trackParticles = {};
 };
 
 CSequenceInstance.prototype.SetInstanceInSequenceStatus = function (_inSequence)
@@ -6786,7 +6841,9 @@ function TrackEval() {
     this.yOrigin = 0;
     this.gain = 1;
     this.pitch = 1;
-    this.falloff = 0;
+    this.falloffRef = 100;
+    this.falloffMax = 10000;
+    this.falloffFactor = 1;
     //this.width = 0;
     //this.height = 0;
     this.imageIndex = 0;
@@ -6807,7 +6864,7 @@ function TrackEval() {
 
     this.spriteIndex = -1;
     this.instanceID = OBJECT_NOONE;
-    this.particleSystemIndex = -1; // particle tracks
+    this.particleSystemID = -1; // particle tracks
     this.emitterIndex = -1;
     this.soundIndex = -1;
     this.pSequence = null;
@@ -6843,7 +6900,9 @@ TrackEval.prototype.ResetVariables = function ()
     this.yOrigin = 0;
     this.gain = 1;
     this.pitch = 1;
-    this.falloff = 0;
+    this.falloffRef = 100;
+    this.falloffMax = 10000;
+    this.falloffFactor = 1;
     this.imageIndex = 0;
     this.imageSpeed = 1;
     this.imageDistance = -1;
@@ -7097,19 +7156,45 @@ function TrackEvalNode(_parent)
                 this.value.paramset.SetBit(eT_Pitch);
             }
         },
-        gmlfalloff: {
+        gmlfalloffRef: {
             enumerable: true,
             get: function ()
             {
-                return this.value.falloff;
+                return this.value.falloffRef;
             },
             set: function (_val)
             {
-                this.value.falloff = yyGetInt32(_val);
+                this.value.falloffRef = yyGetInt32(_val);
 
                 this.value.paramset.SetBit(eT_Falloff);
             }
-        },        
+        },
+        gmlfalloffMax: {
+            enumerable: true,
+            get: function ()
+            {
+                return this.value.falloffMax;
+            },
+            set: function (_val)
+            {
+                this.value.falloffMax = yyGetInt32(_val);
+
+                this.value.paramset.SetBit(eT_Falloff);
+            }
+        },
+        gmlfalloffFactor: {
+            enumerable: true,
+            get: function ()
+            {
+                return this.value.falloffFactor;
+            },
+            set: function (_val)
+            {
+                this.value.falloffFactor = yyGetInt32(_val);
+
+                this.value.paramset.SetBit(eT_Falloff);
+            }
+        },    
         gmlimageindex: {
             enumerable: true,
             get: function ()
@@ -7309,6 +7394,21 @@ function TrackEvalNode(_parent)
                 else
                 {
                     return OBJECT_NOONE;
+                }
+            }
+        },
+
+        gmlparticleSystemID: {
+            enumerable: true,
+            get: function ()
+            {
+                if ((this.m_track != null) && (this.m_track.m_type == eSTT_Particle))
+                {
+                    return this.value.particleSystemID;
+                }
+                else
+                {
+                    return -1;
                 }
             }
         },
@@ -8228,6 +8328,18 @@ function CSeqTrackInstanceInfo()
 	this.instanceID = -1;
 	this.ownedBySequence = false;
 	//bool beenCreated;
+};
+
+// #############################################################################################
+/// Function:<summary>
+///             Create a new CSeqTrackParticleInfo object
+///          </summary>
+// #############################################################################################
+/** @constructor */
+function CSeqTrackParticleInfo()
+{
+	this.pKeydata = null;
+	this.particleSystemID = -1;
 };
 
 // #############################################################################################

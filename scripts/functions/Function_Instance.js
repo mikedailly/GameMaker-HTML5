@@ -64,6 +64,7 @@ function instance_id_get(_inst, _index) {
 // #############################################################################################
 function instance_exists(_obj) 
 {
+	if (_obj === undefined) return false;
     var pObj = GetWithArray(yyGetInt32(_obj));
     if (pObj != null && pObj.length > 0)
     {    	
@@ -115,7 +116,7 @@ function instance_number(_obj)
 ///				
 ///			</returns>
 // #############################################################################################
-function instance_position(_x,_y,_obj) 
+function instance_position(_pInst, _x,_y,_obj)
 {
     _x = yyGetReal(_x);
     _y = yyGetReal(_y);
@@ -133,7 +134,7 @@ function instance_position(_x,_y,_obj)
 		}
 		else
 		{
-			var id = Command_InstancePosition(_x,_y,_obj,null);
+			var id = Command_InstancePosition(_pInst, _x,_y,_obj,null);
 		
 			if(id!=OBJECT_NOONE)
 				return id;
@@ -154,7 +155,7 @@ function instance_position(_x,_y,_obj)
 			}
 			else
 			{
-				var id = Command_InstancePosition(_x,_y,obj2,null);
+				var id = Command_InstancePosition(_pInst, _x,_y,obj2,null);
 				if(id!=OBJECT_NOONE)
 					return id;
 			}
@@ -162,13 +163,13 @@ function instance_position(_x,_y,_obj)
 	}
 	else
 	{
-		var id = Command_InstancePosition(_x,_y,_obj,null);
+		var id = Command_InstancePosition(_pInst, _x,_y,_obj,null);
 		if(id!=OBJECT_NOONE)
 			return id;
 	}
 	return OBJECT_NOONE;
 }
-function instance_position_list(_x, _y, _obj, _list, _ordered)
+function instance_position_list(_pInst, _x, _y, _obj, _list, _ordered)
 {
     _x = yyGetReal(_x);
     _y = yyGetReal(_y);
@@ -203,14 +204,14 @@ function instance_position_list(_x, _y, _obj, _list, _ordered)
 			}
 			else
 			{
-				Command_InstancePosition(_x,_y,obj2,instList);
+				Command_InstancePosition(_pInst, _x,_y,obj2,instList);
 			}
 		}
 		skipafterswitch = true;
 	}
 		
 	if(!skipafterswitch) //If we've been passed an array or a tilemap ref don't do this call
-		Command_InstancePosition( _x, _y, _obj, instList);
+		Command_InstancePosition(_pInst, _x, _y, _obj, instList);
 	
 	var count = instList.length;
 	AppendCollisionResults(instList, list, _x, _y, _ordered);
@@ -497,7 +498,7 @@ function Tilemap_CollisionRectangle(_x, _y, _x2, _y2, tilemapind, instlist,prec)
 						GenerateTileMapUVs(CTVert,trow,rcol,tilewidth,tileheight,tiledata);
 						
 						
-						if (spr.PreciseCollisionTilemapRect(tmaskdata, CVert, CTVert, x1, y1, x2, y2, spr.GetWidth()))
+						if (spr.PreciseCollisionTilemapRect(tmaskdata, CVert, CTVert, x1, y1, x2, y2))
 						{
 							if(instlist!=null)
 								instlist.push(tilemapind);
@@ -920,15 +921,19 @@ function Tilemap_PointPlace( _x, _y, tilemapind, instlist,prec)
 
 		t *= rcpTileHeight;
 	
+		l=~~l;
+		t=~~t;
+
+		if ((l < 0) || (t < 0) || (l >= el.m_mapWidth) || (t >= el.m_mapHeight))
+		{
+			//The point is outside the tilemap therefore can't collide
+			return false;
+		}
 
 		var tiledatamask = g_pLayerManager.GetTiledataMask();
 		tiledatamask &= el.m_tiledataMask;
 		
-		l = ~~yymax(l, 0);
-		t = ~~yymax(t, 0);
 
-		l = ~~yymin(l, el.m_mapWidth - 1);
-		t = ~~yymin(t, el.m_mapHeight - 1);
 
 		var index = (t * el.m_mapWidth) + l;
 		//int tmapindex = pTilemapEl->m_pTiles[index];
@@ -979,7 +984,7 @@ function Tilemap_PointPlace( _x, _y, tilemapind, instlist,prec)
 				if ((ui < 0) || (ui >= spr.GetWidth())) return false;
 				if ((vi < 0) || (vi >= spr.GetHeight())) return false;
 
-				if(_ColMaskSet(ui,vi,tmaskdata,spr.GetWidth()))
+				if(spr.ColMaskSet(ui,vi,tmaskdata))
 				{
 					if (instlist != null)
 					{
@@ -1177,7 +1182,7 @@ function Tilemap_InstancePlace(inst, _x, _y, tilemapind,instlist,prec)
 						GenerateTileMapUVs(CTVert,trow,rcol,tilewidth,tileheight,tiledata);
 						
 
-						if (spr2.PreciseCollisionTilemap(inst.image_index, bb1, inst.x, inst.y, inst.image_xscale, inst.image_yscale, inst.image_angle, CVert,  CTVert, tmaskdata,sprwidth))
+						if (spr2.PreciseCollisionTilemap(inst.image_index, bb1, inst.x, inst.y, inst.image_xscale, inst.image_yscale, inst.image_angle, CVert,  CTVert, tmaskdata,spr))
 						{
 
 							inst.SetPosition(xx, yy);
@@ -1230,7 +1235,7 @@ function PerformColTest(_selfinst,_x,_y,_obj)
 			{
 				return _obj;
 			}
-			return -1;
+			return OBJECT_NOONE;
 		}
 		else
 		{
@@ -1259,7 +1264,7 @@ function PerformColTest(_selfinst,_x,_y,_obj)
 					return id;
 			}
 		}
-		return -1;
+		return OBJECT_NOONE;
 	}
 	else
 	{

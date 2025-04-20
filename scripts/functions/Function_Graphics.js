@@ -2293,13 +2293,28 @@ function skeleton_animation_get_event_frames(_inst, _anim, _event)
 ///             Clear the animation at the given track
 ///          </summary>
 // #############################################################################################
-function skeleton_animation_clear(_inst, _track) {
+function skeleton_animation_clear(_inst, _track, _reset, _mixDuration) {
+	if(_reset === undefined)
+	{
+		_reset = false;
+	}
+	else{
+		_reset = yyGetBool(_reset);
+	}
 
-    var skeletonAnim = _inst.SkeletonAnimation();
-    if (skeletonAnim)
-	{		
-        skeletonAnim.ClearAnimation(yyGetInt32(_track));
-	}	
+	if(_mixDuration === undefined)
+	{
+		_mixDuration = 0.0;
+	}
+	else{
+		_mixDuration = yyGetReal(_mixDuration);
+	}
+
+	var skeletonAnim = _inst.SkeletonAnimation();
+	if (skeletonAnim)
+	{
+		skeletonAnim.ClearAnimation(yyGetInt32(_track), _reset, _mixDuration);
+	}
 }
 
 // #############################################################################################
@@ -2661,6 +2676,35 @@ function draw_set_swf_aa_level(_aalevel) {
 function draw_get_swf_aa_level() {
 
     return GR_SWFAAScale;
+};
+
+
+// #############################################################################################
+/// Function:<summary>
+///          	Flag whether or not to draw SVGs with AA
+///          </summary>
+// #############################################################################################
+function draw_enable_svg_aa(_flag) {
+
+    GR_SVGAAEnabled = yyGetBool(_flag);
+};
+
+// #############################################################################################
+/// Function:<summary>
+///          </summary>
+// #############################################################################################
+function draw_set_svg_aa_level(_aalevel) {
+
+    GR_SVGAAScale = yyGetReal(_aalevel);
+};
+
+// #############################################################################################
+/// Function:<summary>
+///          </summary>
+// #############################################################################################
+function draw_get_svg_aa_level() {
+
+    return GR_SVGAAScale;
 };
 
 

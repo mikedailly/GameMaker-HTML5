@@ -108,6 +108,7 @@ function audio_update()
         return;
 
     // Update and apply gains
+    audio_emitters.forEach(_emitter => _emitter.updateGain());
     g_AudioGroups.forEach(_group => _group.gain.update());
     audio_sampledata.forEach(_asset => {
         if (_asset != null) {
@@ -373,7 +374,8 @@ audioSound.prototype.Init = function(_props)
 	this.bStreamed = false;
 	this.bBuffered = false;
 	this.bQueued = false;
-    this.pgainnode.gain.value = AudioPropsCalc.CalcGain(this); 
+    this.pgainnode.gain.value = AudioPropsCalc.CalcGain(this);
+    this.request = undefined;
 	
 	if (this.soundid >= 0) {
 	    this.bStreamed = IsSoundStreamed(this.soundid);
@@ -401,13 +403,22 @@ audioSound.prototype.start = function(_buffer) {
 
     const shouldLoop = (this.loop === true) && (startOffset < trueLoopEnd);
 
-    this.pbuffersource = new AudioBufferSourceNode(g_WebAudioContext, {
+    const options = {
         buffer: _buffer,
         loop: shouldLoop,
         loopStart: this.loopStart,
-        loopEnd: this.loopEnd,
+        loopEnd: trueLoopEnd,
         playbackRate: AudioPropsCalc.CalcPitch(this)
-    });
+    };
+
+    if (typeof AudioBufferSourceNode !== "undefined") {
+        this.pbuffersource = new AudioBufferSourceNode(g_WebAudioContext, options);
+    } else {
+        this.pbuffersource = g_WebAudioContext.createBufferSource();
+        for (const k in options) {
+            this.pbuffersource[k] = options[k];
+        }
+    }
 
     this.pbuffersource.onended = (_event) => {
         this.bActive = false;
@@ -441,6 +452,8 @@ audioSound.prototype.play = function() {
     if (g_WebAudioContext === null)
         return;
 
+    this.bActive = true;
+
     const asset = Audio_GetSound(this.soundid);
 
     if (asset.state !== AudioSampleState.READY ) {
@@ -470,6 +483,12 @@ audioSound.prototype.play = function() {
         request.responseType = "arraybuffer";
         request.onload = () => {
             const audioData = request.response;
+            
+            if (request.status < 200 || request.status >= 300) {
+                console.log("Request for " + srcUrl + " failed - sound will not play.");
+                this.stop();
+                return;
+            }
 
             g_WebAudioContext.decodeAudioData(audioData)
             .then((_buffer) => {
@@ -478,11 +497,18 @@ audioSound.prototype.play = function() {
         };
 
         request.send();
+        this.request = request;
     }
     else {
         if (this.bQueued) {
             const queue_id = this.soundid - BASE_QUEUE_SOUND_INDEX;
             const queueSound = queue_sounds[queue_id];
+
+            if (queueSound.scriptNode.sourceBuffers.length === 0) {
+                console.log("Error: Audio queue has no queued buffers");
+                this.bActive = false;
+                return;
+            }
 
             queueSound.gainnode = this.pgainnode;
 
@@ -495,8 +521,6 @@ audioSound.prototype.play = function() {
             this.start(asset.buffer);
         }
     }
-
-    this.bActive = true;
 };
 
 audioSound.prototype.stop = function() {
@@ -518,6 +542,11 @@ audioSound.prototype.stop = function() {
 
     if (this.pgainnode !== null)
         this.pgainnode.disconnect();
+
+    if (this.request !== undefined) {
+        this.request.abort();
+        this.request = undefined;
+    }
 
     this.pemitter = null;
     this.bActive = false;
@@ -579,7 +608,7 @@ audioSound.prototype.isPlaying = function() {
     if (this.bQueued) {
         var queued_sound = queue_sounds[this.soundid - BASE_QUEUE_SOUND_INDEX];
 
-        if (!queued_sound || !queued_sound.scriptNode || !queued_sound.scriptNode.onended) 
+        if (!queued_sound || !queued_sound.scriptNode || !queued_sound.scriptNode.onended || queued_sound.scriptNode.sourceBuffers.length <= 0) 
             return false;
 
         return true;
@@ -632,25 +661,34 @@ audioSound.prototype.getLoopState = function() {
 };
 
 audioSound.prototype.setLoopStart = function(_offsetSecs) {
-    if (this.bActive === false || g_WebAudioContext === null)
+    if (this.bActive === false || g_WebAudioContext === null) {
         return;
+    }
 
-    const samplePeriod = 1.0 / g_WebAudioContext.sampleRate;
+    let clampedStart = Math.max(0.0, _offsetSecs);
+    if (clampedStart != _offsetSecs) {
+        console.log("Warning: Loop start (" + _offsetSecs + ") was clipped to " + 0.0 + " as it cannot be negative");
+    }
+    else {
+        const samplePeriod = 1.0 / g_WebAudioContext.sampleRate;
+        const trueEnd = this.getTrueLoopEnd();
+        const maxStart = trueEnd - samplePeriod;
 
-    const trueLoopEnd = this.getTrueLoopEnd();
-    const maxLoopStart = trueLoopEnd - samplePeriod;
-
-    _offsetSecs = Math.max(0.0, _offsetSecs);
-    _offsetSecs = Math.min(_offsetSecs, maxLoopStart);
+        clampedStart = Math.min(_offsetSecs, maxStart);
+        if (clampedStart != _offsetSecs) {
+            console.log("Warning: Loop start (" + _offsetSecs + ") was clipped to " + trueEnd
+                + " as it cannot be greater than the loop end (" + trueEnd + ")");
+        }
+    }
 
     this.setPlaybackCheckpoint();
 
-    this.loopStart = _offsetSecs;
+    this.loopStart = clampedStart;
     
     if (this.pbuffersource === null)
         return;
 
-    this.pbuffersource.loopStart = _offsetSecs;
+    this.pbuffersource.loopStart = this.loopStart;
 };
 
 audioSound.prototype.setLoopEnd = function(_offsetSecs) {
@@ -658,23 +696,33 @@ audioSound.prototype.setLoopEnd = function(_offsetSecs) {
         return;
 
     const samplePeriod = 1.0 / g_WebAudioContext.sampleRate;
-    const duration = this.pbuffersource.buffer.duration;
-    const loopStart = this.pbuffersource.loopStart;
 
-    const minLoopEnd = (_offsetSecs <= 0.0) ? 0.0 : (loopStart + samplePeriod);
+    const minEnd = (_offsetSecs <= 0.0) ? 0.0 : (this.loopStart + samplePeriod);
 
-    _offsetSecs = Math.max(minLoopEnd, _offsetSecs);
-    _offsetSecs = Math.min(_offsetSecs, duration);      
+    let clampedEnd = Math.max(minEnd, _offsetSecs);
+    if (clampedEnd != _offsetSecs) {
+        console.log("Warning: Loop end (" + _offsetSecs + ") was clipped to " + clampedEnd 
+            + " as it cannot be less than the loop start (" + minEnd + ")");
+    }
+    else {
+        const duration = audio_sound_length(this.soundid);
+
+        clampedEnd = Math.min(_offsetSecs, duration);
+        if (clampedEnd != _offsetSecs) {
+            console.log("Warning: Loop end (" + _offsetSecs + ") was clipped to " + clampedEnd
+                + " as it cannot be greater than the duration");
+        }
+    }
     
     this.setPlaybackCheckpoint();
 
-    this.loopEnd = _offsetSecs;
+    this.loopEnd = clampedEnd;
 
     if (this.pbuffersource === null)
         return;
 
     const playbackPosition = this.playbackCheckpoint.bufferTime;
-    const trueLoopEnd = (_offsetSecs > 0.0) ? _offsetSecs : duration;
+    const trueLoopEnd = (this.loopEnd > 0.0) ? this.loopEnd : duration;
     /* 
         Once the loop section has been reached a single time, Web Audio
         considers the buffer source to be 'looping' and will constrain the playback
@@ -684,7 +732,7 @@ audioSound.prototype.setLoopEnd = function(_offsetSecs) {
         The voice-level property (i.e. this.loop) will still reflect the user's chosen loop status.
     */
     this.pbuffersource.loop = (this.loop === true) && (playbackPosition < trueLoopEnd);
-    this.pbuffersource.loopEnd = _offsetSecs;
+    this.pbuffersource.loopEnd = this.loopEnd;
 };
 
 audioSound.prototype.getLoopStart = function() {
@@ -1403,6 +1451,7 @@ function audio_music_is_playing()
 
 function audio_exists(_id) {
 
+    if (_id === undefined) return false;
     _id = yyGetInt32(_id);
 
     //check for audio resource
@@ -1458,8 +1507,10 @@ function audio_sound_pitch(_soundid, _pitch)
 
     if (g_AudioModel != Audio_WebAudio)
         return;
+
+    _pitch = Math.max(Number.MIN_VALUE, _pitch);
     
-	if (_soundid >= BASE_SOUND_INDEX) {
+    if (_soundid >= BASE_SOUND_INDEX) {
         const voice = GetAudioSoundFromHandle(_soundid);
 
         if (voice === null)
@@ -1507,7 +1558,7 @@ function audio_sound_get_gain(_index)
     return 0;
 }
 
-function audio_sound_gain(_index, _gain, _timeMs)
+function audio_sound_gain(_index, _gain, _timeMs = 0)
 {
     _index = yyGetInt32(_index);
 
@@ -1709,8 +1760,6 @@ function audio_sound_loop_start(_index, _offsetSecs) {
         return;
     }
 
-    _offsetSecs = clamp(_offsetSecs, 0, assetDuration);
-
     if (_index >= BASE_SOUND_INDEX) {
         const voice = GetAudioSoundFromHandle(_index);
 
@@ -1725,10 +1774,32 @@ function audio_sound_loop_start(_index, _offsetSecs) {
             return;
         }
 
-        asset.loopStart = _offsetSecs;
+        let clampedStart = Math.max(0, _offsetSecs);
+        if (clampedStart != _offsetSecs) {
+            console.log("Warning: Loop start (" + _offsetSecs + ") was clipped to " + 0.0 + " as it cannot be negative");
+        }
+        else {
+            let maxStart = 0;
+            const duration = audio_sound_length(_index);
+
+            if (asset.loopEnd > 0) {
+                maxStart = asset.loopEnd;
+            }
+            else if (duration > 0) {
+                maxStart = duration;
+            }
+
+            clampedStart = Math.min(clampedStart, maxStart);
+            if (clampedStart != _offsetSecs) {
+                console.log("Warning: Loop start (" + _offsetSecs + ") was clipped to " + clampedStart
+                    + " as it cannot be greater than the loop end (" + maxStart + ")");
+            }
+        }
+
+        asset.loopStart = clampedStart;
 
         audio_sounds.filter(_voice => _voice.soundid === _index)
-                    .forEach(_voice => _voice.setLoopStart(_offsetSecs));
+                    .forEach(_voice => _voice.setLoopStart(asset.loopStart));
 	}
 }
 
@@ -1766,8 +1837,6 @@ function audio_sound_loop_end(_index, _offsetSecs) {
         return;
     }
 
-    _offsetSecs = clamp(_offsetSecs, 0, assetDuration);
-
     if (_index >= BASE_SOUND_INDEX) {
         const voice = GetAudioSoundFromHandle(_index);
 
@@ -1782,10 +1851,29 @@ function audio_sound_loop_end(_index, _offsetSecs) {
             return;
         }
 
-        asset.loopEnd = _offsetSecs;
+        const minEnd = (asset.loopEnd <= 0.0) ? 0.0 : asset.loopStart;
+        const duration = Math.max(0.0, audio_sound_length(_index));
+        if (duration < 0) {
+            console.log("Warning: Asset duration is not currently known - using" + 0.0);
+        }
+
+        let clampedEnd = Math.max(minEnd, _offsetSecs);
+        if (clampedEnd != _offsetSecs) {
+            console.log("Warning: Loop end (" + _offsetSecs + ") was clipped to " + clampedEnd 
+                + " as it cannot be less than the loop start (" + minEnd + ")");
+        }
+        else {
+            clampedEnd = Math.min(_offsetSecs, duration);
+            if (clampedEnd != _offsetSecs) {
+                console.log("Warning: Loop end (" + _offsetSecs + ") was clipped to " + clampedEnd
+                    + " as it cannot be greater than the duration");
+            }
+        }
+
+        asset.loopEnd = clampedEnd;
 
         audio_sounds.filter(_voice => _voice.soundid === _index)
-                    .forEach(_voice => _voice.setLoopEnd(_offsetSecs));
+                    .forEach(_voice => _voice.setLoopEnd(asset.loopEnd));
 	}
 }
 
@@ -2113,7 +2201,6 @@ function audio_listener_velocity( _one,_two,_three)
         _three = yyGetReal(_three);
 
         var lis = g_WebAudioContext.listener;
-        lis.setVelocity( _one, _two, _three );
 
     	// AB: Need to check if pos exists - can be undefined on some browsers
         if ( lis.velocity )
@@ -2312,17 +2399,17 @@ function audio_get_master_gain( _listenerId )
 }
 
 /* Sets the gain of an emitter. Also updates any voices playing on the emitter. */
-function audio_emitter_gain(_emitterIndex, _gain) {
+function audio_emitter_gain(_emitterIndex, _gain, _timeMs = 0) {
     const emitter = Audio_GetEmitterOrThrow(_emitterIndex);
 
     if (emitter === undefined)
         return;
 
     _gain = yyGetReal(_gain);
-    _gain = Math.max(0.0, _gain);
+    _timeMs = yyGetInt32(_timeMs);
 
     /* Voice gain is updated in audio_update() */
-    emitter.gainnode.gain.value = _gain;
+    emitter.setGain(_gain, _timeMs);
 }
 
 /* Retrieves the gain of an emitter. */
@@ -2332,7 +2419,7 @@ function audio_emitter_get_gain(_emitterIndex) {
     if (emitter === undefined)
         return 0.0;
 
-    return emitter.gainnode.gain.value;
+    return emitter.getGain();
 }
 
 /* Sets the pitch of an emitter. Also updates any voices playing on the emitter. */
@@ -2343,7 +2430,7 @@ function audio_emitter_pitch(_emitterIndex, _pitch) {
         return;
 
     _pitch = yyGetReal(_pitch);
-    _pitch = Math.max(0.0, _pitch);
+    _pitch = Math.max(Number.MIN_VALUE, _pitch);
 
     emitter.pitch = _pitch;
 
@@ -2429,7 +2516,6 @@ function audio_get_listener_info(index)
     }
     return -1;
 }
-function audio_debug(trueFalse)                             {}
 
 // @if feature("audio")
 //loading -------------------------
@@ -3012,7 +3098,7 @@ function audio_group_stop_all( _groupId )
     audio_group_stop_sounds( yyGetInt32(_groupId) );
 }
 
-function audio_group_set_gain(_groupId, _gain, _timeMs)
+function audio_group_set_gain(_groupId, _gain, _timeMs = 0)
 {
     _groupId = yyGetInt32(_groupId);
     _gain = yyGetReal(_gain);
@@ -3069,6 +3155,15 @@ function audio_sound_get_audio_group(_soundIndex)
     return asset.groupId;
 }
 
+function audio_sound_get_asset(_voiceIndex)
+{
+    const voice = GetAudioSoundFromHandle(_voiceIndex);
+    if (voice === null || voice.bActive === false) {
+        return undefined;
+    }
+    return voice.soundid;
+}
+
 function audio_create_stream(_filename)
 {
     var sampleData = new audioSampleData();
@@ -3080,6 +3175,7 @@ function audio_create_stream(_filename)
     sampleData.duration = -1; //unknown
     sampleData.groupId = 0;
     sampleData.fromFile = yyGetString(_filename);
+    sampleData.state = AudioSampleState.READY;
 
     //append to end of audio_sampledata array (or fill in empty slots created by audio_destroy_stream)
     var index = audio_sampledata.length;
@@ -3091,6 +3187,26 @@ function audio_create_stream(_filename)
     }
 
     audio_sampledata[index] = sampleData;
+
+    const srcUrl = getUrlForSound(index);
+
+    // Kick off a request to populate the asset duration
+    const request = new XMLHttpRequest();
+    request.open("GET", srcUrl, true);
+    request.responseType = "arraybuffer";
+    request.onload = () => {
+        if (request.status < 200 || request.status >= 300) {
+            console.log("Request for " + srcUrl + " failed.");
+            return;
+        }
+
+        g_WebAudioContext.decodeAudioData(request.response)
+        .then((_buffer) => {
+            sampleData.duration = _buffer.duration;
+        });
+    };
+    request.send();
+
     return index;
 }
 
@@ -3195,56 +3311,25 @@ function audio_create_buffer_sound(_bufferId, _bufferFormat, _sampleRate, _offse
 
     _sampleRate = Math.min(Math.max(_sampleRate, 8000), 48000);
 
-    buffer_seek( _bufferId, eBuffer_Start, 0 );
-    var bufferSize = _length;
-
-    /* Here we prevent the Web Audio context from cleanly resampling the buffer
-       to the rate of the audio context by aligning the audio buffer rate with
-       that of the audio context and then crudely resampling the signal ourselves.
-       This is done to emulate the resampling that happens on other platforms
-       and maintain consistency of the perceived sound. */
-
-    // Find the new/old sample rate ratio
-    const sr_ratio = g_WebAudioContext.sampleRate / _sampleRate;
-
-    // And its inverse
-    const increment = 1.0 / sr_ratio;
+    buffer_seek(_bufferId, eBuffer_Start, _offset);
 
     // Calculate the divisor needed to convert from u8/s16 to f32
     const divisor = Math.pow(2, bitsPerSample - 1);
 
     // Create the audio buffer
     const bufferOptions = {
-        length: _length / (numChannels * bitsPerSample / 8) * sr_ratio,
+        length: _length / (numChannels * bitsPerSample / 8),
         numberOfChannels: numChannels,
-        sampleRate: g_WebAudioContext.sampleRate
+        sampleRate: _sampleRate
     };
 
     const audioBuffer = new AudioBuffer(bufferOptions);
 
-    // Used for counting samples using the inverse of sr_ratio
-    let frac_pos = 0.0;
-
-    for (let f = 0; f < audioBuffer.length; ++f)
-    {
-        for (let ch = 0; ch < audioBuffer.numberOfChannels; ++ch)
-        {
+    for (let f = 0; f < audioBuffer.length; ++f) {
+        for (let ch = 0; ch < audioBuffer.numberOfChannels; ++ch) {
             const channelData = audioBuffer.getChannelData(ch);
-
-            if (frac_pos - 1.0 >= 0.0)
-            {
-                // Take a new sample from the signal
-                channelData[f] = (buffer_read(_bufferId, _bufferFormat) / divisor) - 1.0;
-                frac_pos -= 1.0;
-            }
-            else
-            {
-                // Copy the previous sample
-                channelData[f] = channelData[f - 1];
-            }
-
-            frac_pos += increment;
-        }  
+            channelData[f] = (buffer_read(_bufferId, _bufferFormat) / divisor) - 1.0;
+        }
     }
 
     var sampleData = new audioSampleData();
@@ -3252,7 +3337,7 @@ function audio_create_buffer_sound(_bufferId, _bufferFormat, _sampleRate, _offse
     sampleData.configGain = 1.0;
     sampleData.pitch = 1.0;
     sampleData.kind = AudioStreamType.UNSTREAMED;
-    sampleData.duration = bufferSize / ( _sampleRate * numChannels * bitsPerSample / 8 );
+    sampleData.duration = audioBuffer.duration;
     sampleData.groupId = 0;
     sampleData.commands = [];
     sampleData.state = AudioSampleState.READY;
@@ -3363,7 +3448,7 @@ function audio_create_play_queue(_format, _sampleRate, _channels)
 
     newSound.scriptNode = g_WebAudioContext.createScriptProcessor(DYNAMIC_BUFFER_SIZE, 0, num_channels);
     newSound.scriptNode.sourceBuffers = [];
-    newSound.scriptNode.pendingSourceBufferCount = 0;
+    newSound.scriptNode.pendingBuffers = [];
     newSound.scriptNode.currentOffset = 0;
 
     newSound.scriptNode.onaudioprocess = function (audioProcessingEvent)
@@ -3374,6 +3459,14 @@ function audio_create_play_queue(_format, _sampleRate, _channels)
         var outputBuffer = audioProcessingEvent.outputBuffer;
         var scriptNode = newSound.scriptNode;
         var max_channels = outputBuffer.numberOfChannels;
+
+        if (scriptNode.sourceBuffers.length <= 0) {
+            const voice = audio_sounds.find(voice => voice.soundid === newSound.handle);
+            if (voice !== undefined) {
+                voice.stop();
+            }
+            return;
+        }
 
         // put the data from the current buffer in there
         for (var sample = 0; sample < DYNAMIC_BUFFER_SIZE; sample++)
@@ -3501,21 +3594,33 @@ function audio_queue_sound(_queueId, _bufferId, _offset, _len)
 
         var pBuff = buffer_get_address(wavBuffer);
 
-        queueSound.scriptNode.pendingSourceBufferCount++;
+        queueSound.scriptNode.pendingBuffers.push({
+            id: _bufferId,
+            buffer: undefined
+        });
 
         try {
-            g_WebAudioContext.decodeAudioData(pBuff,
-                    function(buffer) {
-                        buffer_delete(wavBuffer);
-                        buffer.__old_buffer_id = _bufferId;
-                        queueSound.scriptNode.sourceBuffers.push(buffer);
-                        queueSound.scriptNode.pendingSourceBufferCount--;
-                    },
-                    function(err)
-                    {
-                        debug("error decoding audio data:" + err);
-                        buffer_delete(wavBuffer);
+            g_WebAudioContext.decodeAudioData(pBuff, 
+                buffer => {
+                    buffer_delete(wavBuffer);
+                    buffer.__old_buffer_id = _bufferId;
+
+                    const bundle = queueSound.scriptNode.pendingBuffers.find(elem => elem.id === _bufferId);
+                    bundle.buffer = buffer;
+
+                    while (queueSound.scriptNode.pendingBuffers.length > 0) {
+                        const front = queueSound.scriptNode.pendingBuffers[0];
+                        if (front === undefined || front.buffer === undefined) {
+                            break;
+                        }
+                        queueSound.scriptNode.sourceBuffers.push(front.buffer);
+                        queueSound.scriptNode.pendingBuffers.shift();
                     }
+                },
+                err => {
+                    debug("error decoding audio data:" + err);
+                    buffer_delete(wavBuffer);
+                }
             );
         } catch( ex ) {
             debug("audio_create_buffer_sound - error decoding audio data: " + ex + " -- " + ex.message );

@@ -1390,7 +1390,12 @@ function    yyFontManager( )
 	this.SDF_State.SDFShaders = [];
 	this.SDF_State.usingSDFShader = FONTSDFSHADER_DISABLED;
 
+	// Uniform indices (normal shader)
+	this.gm_SDF_Dist_UV = -1;
+
 	// Uniform indices (effect shader)
+	this.gm_SDF_Dist_UV__effect = -1;
+
 	this.SDF_State.gm_SDF_DrawGlow = -1;
 	this.SDF_State.gm_SDF_Glow_MinMax = -1;
 	this.SDF_State.gm_SDF_Glow_Col = -1;
@@ -1421,9 +1426,17 @@ function    yyFontManager( )
 		this.SDF_State.SDFShaders[FONTSDFSHADER_EFFECT] = asset_get_index("__yy_sdf_effect_shader");
 		this.SDF_State.SDFShaders[FONTSDFSHADER_BLUR] = asset_get_index("__yy_sdf_blur_shader");
 
+		if (this.SDF_State.SDFShaders[FONTSDFSHADER_BASIC] != -1)
+		{
+			var shaderID = this.SDF_State.SDFShaders[FONTSDFSHADER_BASIC];
+			this.SDF_State.gm_SDF_Dist_UV = shader_get_uniform(shaderID, "gm_SDF_Dist_UV");
+		}
+
 		if (this.SDF_State.SDFShaders[FONTSDFSHADER_EFFECT] != -1)
 		{
 			var shaderID = this.SDF_State.SDFShaders[FONTSDFSHADER_EFFECT];
+			this.SDF_State.gm_SDF_Dist_UV__effect = shader_get_uniform(shaderID, "gm_SDF_Dist_UV");
+
 			this.SDF_State.gm_SDF_DrawGlow = shader_get_uniform(shaderID, "gm_SDF_DrawGlow");
 			this.SDF_State.gm_SDF_Glow_MinMax = shader_get_uniform(shaderID, "gm_SDF_Glow_MinMax");
 			this.SDF_State.gm_SDF_Glow_Col = shader_get_uniform(shaderID, "gm_SDF_Glow_Col");
@@ -1453,6 +1466,18 @@ yyFontManager.prototype.Start_Rendering_SDF = function(_pFont, _shadowPass, _pEf
 		if (shader_current() != -1)
 			return;							// don't override existing user shader
 
+		if (_pFont.TPEntry == null)
+			return;
+		
+		var TP = _pFont.TPEntry; 
+		if (!TP.texture.complete) return;                   // if texture hasn't loaded, return...
+
+		var texwidth = TP.texture.width;
+		var texheight = TP.texture.height;
+		
+		if ((texwidth == 0) || (texheight == 0))
+			return;
+
 		var pEffectParams = _pEffectOverride;
 		if ((pEffectParams == undefined) || (pEffectParams == null))
 		{
@@ -1481,8 +1506,18 @@ yyFontManager.prototype.Start_Rendering_SDF = function(_pFont, _shadowPass, _pEf
 
 		WebGL_shader_set_RELEASE(SDFshader);
 
-		if (shadertype == FONTSDFSHADER_EFFECT)
+		var spread_half_pixel = 0.4 / _pFont.sdfSpread;		// tweaked down to 0.4 rather than 0.5 to increase sharpness
+		var spreadU = spread_half_pixel * texwidth;
+		var spreadV = spread_half_pixel * texheight;
+
+		if (shadertype == FONTSDFSHADER_BASIC)
 		{
+			shader_set_uniform_f(this.SDF_State.gm_SDF_Dist_UV, spreadU, spreadV); 
+		}
+		else if (shadertype == FONTSDFSHADER_EFFECT)
+		{
+			shader_set_uniform_f(this.SDF_State.gm_SDF_Dist_UV__effect, spreadU, spreadV); 
+
 			var distscale = 1.0 / (_pFont.sdfSpread * 2.0); // the SDF ranges from -32 to 32 
 			var distbias = 0.5;			
 
@@ -1965,7 +2000,10 @@ yyFontManager.prototype.Split_TextBlock_IDEstyle = function (_pStr, _boundsWidth
 		{
 			textLines[textLines.length] = pNew.substring(start, char);
 
-			while((pNew[char] == newline) || (pNew[char] == newline2))
+			var thechar = pNew[char];
+			char++;
+
+			if ((char < len) && ((pNew[char] == newline) || (pNew[char] == newline2)) && (pNew[char] != thechar))			
 			{
 				char++;
 			}
@@ -1988,7 +2026,7 @@ yyFontManager.prototype.Split_TextBlock_IDEstyle = function (_pStr, _boundsWidth
 	var lineHeight = this.thefont.max_glyph_height;
 	var totalW = 0.0;
 
-	var spaceWidth = this.thefont.GetShift(32);
+	var spaceWidth = this.thefont.GetShift(32) * this.thefont.scalex;
 	for(var p = 0; p < textLines.length; p++)
 	{
 		var str = textLines[p];
@@ -2031,7 +2069,8 @@ yyFontManager.prototype.Split_TextBlock_IDEstyle = function (_pStr, _boundsWidth
 
 					// Okay we've found a word or reached the end of the line
 					var wordWidth = this.thefont.TextWidthN(str, wordStart, curr - wordStart, _charSpacing);
-					if ((lineWidth + wordWidth) > _boundsWidth)
+					var extrawidthforspace = (lineWords > 0) ? spaceWidth : 0.0;
+					if ((lineWidth + wordWidth + extrawidthforspace) > _boundsWidth)
 					{
 						// Add what we've got
 						if (lineWords == 0)
@@ -2086,11 +2125,7 @@ yyFontManager.prototype.Split_TextBlock_IDEstyle = function (_pStr, _boundsWidth
 					{
 						wordEnd = curr;
 
-						if (lineWords > 0)
-						{
-							lineWidth += spaceWidth;
-						}
-
+						lineWidth += extrawidthforspace;
 						lineWidth += wordWidth;
 						lineWords++;
 					}
@@ -2422,7 +2457,7 @@ yyFontManager.prototype.GR_Text_Draw = function (_str, x, y, linesep, linewidth,
 ///				
 ///			 </returns>
 // #############################################################################################
-yyFontManager.prototype.GR_StringList_Draw_IDEstyle = function (_sl, _x, _y, _charSpacing, _clipLeft, _clipRight, _pFontParams)
+yyFontManager.prototype.GR_StringList_Draw_IDEstyle = function (_sl, _x, _y, _charSpacing, _clipLeft, _clipRight, _pFontParams, _seqYOffset)
 {
 	if (_sl == null)
 		return;
@@ -2477,16 +2512,19 @@ yyFontManager.prototype.GR_StringList_Draw_IDEstyle = function (_sl, _x, _y, _ch
 	else
 	{
 		var basey = _y;
-		basey += thefont.max_glyph_height;
-
-		if(thefont.ascenderOffset != undefined)
+		if (_seqYOffset)
 		{
-			basey -= thefont.ascenderOffset;
-		}
+			basey += thefont.max_glyph_height;
 
-		if(thefont.ascender != undefined)
-		{
-			basey -= thefont.ascender;
+			if(thefont.ascenderOffset != undefined)
+			{
+				basey -= thefont.ascenderOffset;
+			}
+
+			if(thefont.ascender != undefined)
+			{
+				basey -= thefont.ascender;
+			}
 		}
 
 		var hasDropShadow = false; 

@@ -1,4 +1,4 @@
-﻿// **********************************************************************************************************************
+// **********************************************************************************************************************
 // 
 // Copyright (c)2011, YoYo Games Ltd. All Rights reserved.
 // 
@@ -321,29 +321,31 @@ function    HandleCollision()
         						pInst1.PerformEvent( EVENT_COLLISION, pInst2.pObject.ID, pInst1, pInst2);
                                 pInst2.PerformEvent( EVENT_COLLISION, pInst1.pObject.ID, pInst2, pInst1);
         						
+								if (g_Collision_Compatibility_Mode)
+								{
+									if ((pInst1.solid) || (pInst2.solid))
+									{
+										pInst1.Adapt_Path();         // We do not call the end-of-path event again
+										pInst2.Adapt_Path();
+										pInst1.SetPosition(pInst1.x + pInst1.hspeed, pInst1.y + pInst1.vspeed);
+										pInst2.SetPosition(pInst2.x + pInst2.hspeed, pInst2.y + pInst2.vspeed);
 
-        						if ((pInst1.solid) || (pInst2.solid))
-        						{
-        							pInst1.Adapt_Path();         // We do not call the end-of-path event again
-        							pInst2.Adapt_Path();
-        							pInst1.SetPosition(pInst1.x + pInst1.hspeed, pInst1.y + pInst1.vspeed);
-        							pInst2.SetPosition(pInst2.x + pInst2.hspeed, pInst2.y + pInst2.vspeed);
 
+										// If collision is not resolved then set to previous position
+										if (pInst1.Collision_Instance(pInst2, true))
+										{
+											pInst1.x = pInst1.xprevious;
+											pInst1.y = pInst1.yprevious;
+											pInst1.bbox_dirty = true;
+											pInst1.path_position = pInst1.path_positionprevious;
 
-        							// If collision is not resolved then set to previous position
-        							if (pInst1.Collision_Instance(pInst2, true))
-        							{
-        								pInst1.x = pInst1.xprevious;
-        								pInst1.y = pInst1.yprevious;
-        								pInst1.bbox_dirty = true;
-        								pInst1.path_position = pInst1.path_positionprevious;
-
-        								pInst2.x = pInst2.xprevious;
-        								pInst2.y = pInst2.yprevious;
-        								pInst2.bbox_dirty = true;
-        								pInst2.path_position = pInst2.path_positionprevious;
-        							}
-        						}
+											pInst2.x = pInst2.xprevious;
+											pInst2.y = pInst2.yprevious;
+											pInst2.bbox_dirty = true;
+											pInst2.path_position = pInst2.path_positionprevious;
+										}
+									}
+								}
         					}
         				}
         			}
@@ -403,6 +405,7 @@ function HandleMouse()
         for (var o = 0; o < ObjPool.length; o++)
         {
             var pObj = ObjPool[o];
+            if (pObj == undefined) continue;
             var pREvent = pObj.REvent;
             if (pREvent[EVENT_MOUSE_LBUTTON_DOWN] || pREvent[EVENT_MOUSE_MBUTTON_DOWN] || pREvent[EVENT_MOUSE_RBUTTON_DOWN] ||
                     pREvent[EVENT_MOUSE_LBUTTON_PRESSED] || pREvent[EVENT_MOUSE_MBUTTON_PRESSED] || pREvent[EVENT_MOUSE_RBUTTON_PRESSED] ||
@@ -423,6 +426,16 @@ function HandleMouse()
                 		// If the instance uses ANY mouse event, then we need to 
                 		if (!pInst.marked && (pInst.createCounter <= count))
                 		{
+							if (pInst.GetInGUISpace()) {
+								mousex = device_mouse_x_to_gui(0);
+								mousey = device_mouse_y_to_gui(0);
+							}
+							else if (pInst.GetOnUILayer()) {
+								m = GR_Window_Views_Convert(g_pIOManager.MouseX, g_pIOManager.MouseY, false);
+								mousex = m[0];
+								mousey = m[1];
+							}
+
                 			// NOTE:    This isn't "exactly" how GM8.x works. This will not loop through each instance, on each event.
                 			//          Instead, it takes a single instance and does all mouse events on that instance.
                 			if (pInst.bbox_dirty) pInst.Compute_BoundingBox();

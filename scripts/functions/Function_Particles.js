@@ -124,7 +124,7 @@ function ParticleSystemGetInfoImpl(_ind, _isInstance)
             variable_struct_set(pPSI, "oldtonew", (pPS.drawOrder == 0));
             variable_struct_set(pPSI, "global_space", pPS.globalSpaceParticles);
 
-            for (var i = 0; i < pPS.emitters.length; ++i)
+            for (var i = pPS.emitters.length - 1; i >= 0; --i)
             {
                 var emitter = g_PSEmitters[pPS.emitters[i]];
                 if (emitter)
@@ -146,6 +146,7 @@ function ParticleSystemGetInfoImpl(_ind, _isInstance)
         var emitter = emitters[i];
         var pEmitterI = new GMLObject();
 
+        variable_struct_set(pEmitterI, "ind", MAKE_REF(REFID_PART_EMITTER, i));
         variable_struct_set(pEmitterI, "name", emitter.name);
         variable_struct_set(pEmitterI, "mode", emitter.mode);
         variable_struct_set(pEmitterI, "number", emitter.number);
@@ -167,52 +168,57 @@ function ParticleSystemGetInfoImpl(_ind, _isInstance)
         var pPartTypeI = new GMLObject();
         var particleType = g_ParticleTypes[emitter.parttype];
 
-        variable_struct_set(pPartTypeI, "ind", emitter.parttype);
-        variable_struct_set(pPartTypeI, "sprite", particleType.sprite);
-        variable_struct_set(pPartTypeI, "frame", particleType.spritestart);
-        variable_struct_set(pPartTypeI, "animate", particleType.spriteanim);
-        variable_struct_set(pPartTypeI, "stretch", particleType.spritestretch);
-        variable_struct_set(pPartTypeI, "random", particleType.spriterandom);
-        variable_struct_set(pPartTypeI, "shape", particleType.shape);
-        variable_struct_set(pPartTypeI, "size_xmin", particleType.sizeMinX);
-        variable_struct_set(pPartTypeI, "size_xmax", particleType.sizeMaxX);
-        variable_struct_set(pPartTypeI, "size_ymin", particleType.sizeMinY);
-        variable_struct_set(pPartTypeI, "size_ymax", particleType.sizeMaxY);
-        variable_struct_set(pPartTypeI, "size_xincr", particleType.sizeIncrX);
-        variable_struct_set(pPartTypeI, "size_yincr", particleType.sizeIncrY);
-        variable_struct_set(pPartTypeI, "size_xwiggle", particleType.sizeRandX);
-        variable_struct_set(pPartTypeI, "size_ywiggle", particleType.sizeRandY);
-        variable_struct_set(pPartTypeI, "xscale", particleType.xscale);
-        variable_struct_set(pPartTypeI, "yscale", particleType.yscale);
-        variable_struct_set(pPartTypeI, "life_min", particleType.lifemin);
-        variable_struct_set(pPartTypeI, "life_max", particleType.lifemax);
-        variable_struct_set(pPartTypeI, "death_type", particleType.deathtype);
-        variable_struct_set(pPartTypeI, "death_number", particleType.deathnumber);
-        variable_struct_set(pPartTypeI, "step_type", particleType.steptype);
-        variable_struct_set(pPartTypeI, "step_number", particleType.stepnumber);
-        variable_struct_set(pPartTypeI, "speed_min", particleType.spmin);
-        variable_struct_set(pPartTypeI, "speed_max", particleType.spmax);
-        variable_struct_set(pPartTypeI, "speed_incr", particleType.spincr);
-        variable_struct_set(pPartTypeI, "speed_wiggle", particleType.sprand);
-        variable_struct_set(pPartTypeI, "dir_min", particleType.dirmin);
-        variable_struct_set(pPartTypeI, "dir_max", particleType.dirmax);
-        variable_struct_set(pPartTypeI, "dir_incr", particleType.dirincr);
-        variable_struct_set(pPartTypeI, "dir_wiggle", particleType.dirrand);
-        variable_struct_set(pPartTypeI, "grav_amount", particleType.grav);
-        variable_struct_set(pPartTypeI, "grav_dir", particleType.gravdir);
-        variable_struct_set(pPartTypeI, "ang_min", particleType.angmin);
-        variable_struct_set(pPartTypeI, "ang_max", particleType.angmax);
-        variable_struct_set(pPartTypeI, "ang_incr", particleType.angincr);
-        variable_struct_set(pPartTypeI, "ang_wiggle", particleType.angrand);
-        variable_struct_set(pPartTypeI, "ang_relative", particleType.angdir);
-        // variable_struct_set(pPartTypeI, "color_mode", particleType.colmode);
-        variable_struct_set(pPartTypeI, "color1", particleType.colpar[0]);
-        variable_struct_set(pPartTypeI, "color2", particleType.colpar[1]);
-        variable_struct_set(pPartTypeI, "color3", particleType.colpar[2]);
-        variable_struct_set(pPartTypeI, "alpha1", particleType.alphastart);
-        variable_struct_set(pPartTypeI, "alpha2", particleType.alphamiddle);
-        variable_struct_set(pPartTypeI, "alpha3", particleType.alphaend);
-        variable_struct_set(pPartTypeI, "additive", particleType.additiveblend);
+        variable_struct_set(pPartTypeI, "ind", MAKE_REF(REFID_PART_TYPE, emitter.parttype));
+
+        if(particleType!==undefined)
+        {
+            variable_struct_set(pPartTypeI, "sprite", particleType.sprite);
+            variable_struct_set(pPartTypeI, "frame", particleType.spritestart);
+            variable_struct_set(pPartTypeI, "animate", particleType.spriteanim);
+            variable_struct_set(pPartTypeI, "stretch", particleType.spritestretch);
+            variable_struct_set(pPartTypeI, "random", particleType.spriterandom);
+            variable_struct_set(pPartTypeI, "shape", particleType.shape);
+            variable_struct_set(pPartTypeI, "size_xmin", particleType.sizeMinX);
+            variable_struct_set(pPartTypeI, "size_xmax", particleType.sizeMaxX);
+            variable_struct_set(pPartTypeI, "size_ymin", particleType.sizeMinY);
+            variable_struct_set(pPartTypeI, "size_ymax", particleType.sizeMaxY);
+            variable_struct_set(pPartTypeI, "size_xincr", particleType.sizeIncrX);
+            variable_struct_set(pPartTypeI, "size_yincr", particleType.sizeIncrY);
+            variable_struct_set(pPartTypeI, "size_xwiggle", particleType.sizeRandX);
+            variable_struct_set(pPartTypeI, "size_ywiggle", particleType.sizeRandY);
+            variable_struct_set(pPartTypeI, "xscale", particleType.xscale);
+            variable_struct_set(pPartTypeI, "yscale", particleType.yscale);
+            variable_struct_set(pPartTypeI, "life_min", particleType.lifemin);
+            variable_struct_set(pPartTypeI, "life_max", particleType.lifemax);
+            variable_struct_set(pPartTypeI, "death_type", particleType.deathtype);
+            variable_struct_set(pPartTypeI, "death_number", particleType.deathnumber);
+            variable_struct_set(pPartTypeI, "step_type", particleType.steptype);
+            variable_struct_set(pPartTypeI, "step_number", particleType.stepnumber);
+            variable_struct_set(pPartTypeI, "speed_min", particleType.spmin);
+            variable_struct_set(pPartTypeI, "speed_max", particleType.spmax);
+            variable_struct_set(pPartTypeI, "speed_incr", particleType.spincr);
+            variable_struct_set(pPartTypeI, "speed_wiggle", particleType.sprand);
+            variable_struct_set(pPartTypeI, "dir_min", particleType.dirmin);
+            variable_struct_set(pPartTypeI, "dir_max", particleType.dirmax);
+            variable_struct_set(pPartTypeI, "dir_incr", particleType.dirincr);
+            variable_struct_set(pPartTypeI, "dir_wiggle", particleType.dirrand);
+            variable_struct_set(pPartTypeI, "grav_amount", particleType.grav);
+            variable_struct_set(pPartTypeI, "grav_dir", particleType.gravdir);
+            variable_struct_set(pPartTypeI, "ang_min", particleType.angmin);
+            variable_struct_set(pPartTypeI, "ang_max", particleType.angmax);
+            variable_struct_set(pPartTypeI, "ang_incr", particleType.angincr);
+            variable_struct_set(pPartTypeI, "ang_wiggle", particleType.angrand);
+            variable_struct_set(pPartTypeI, "ang_relative", particleType.angdir);
+            // variable_struct_set(pPartTypeI, "color_mode", particleType.colmode);
+            variable_struct_set(pPartTypeI, "color1", particleType.colpar[0]);
+            variable_struct_set(pPartTypeI, "color2", particleType.colpar[1]);
+            variable_struct_set(pPartTypeI, "color3", particleType.colpar[2]);
+            variable_struct_set(pPartTypeI, "alpha1", particleType.alphastart);
+            variable_struct_set(pPartTypeI, "alpha2", particleType.alphamiddle);
+            variable_struct_set(pPartTypeI, "alpha3", particleType.alphaend);
+            variable_struct_set(pPartTypeI, "additive", particleType.additiveblend);
+        }
+
 
         variable_struct_set(pEmitterI, "parttype", pPartTypeI);
 
@@ -234,7 +240,7 @@ function ParticleSystemGetInfoImpl(_ind, _isInstance)
 // #############################################################################################
 function particle_get_info(_ind)
 {
-    var isInstance = ((_ind instanceof YYRef) && _(ind.type == REFID_PART_SYSTEM));
+    var isInstance = ((_ind instanceof YYRef) && (_ind.type == REFID_PART_SYSTEM));
     return ParticleSystemGetInfoImpl(_ind, isInstance);
 }
 
@@ -500,8 +506,31 @@ function part_system_update(_ind)
 // #############################################################################################
 function part_system_drawit(_ind)
 {
-    _ind = GetParticleSystemInstanceIndex(_ind);
-    return ParticleSystem_Draw(_ind);
+    ps = GetParticleSystemInstanceIndex(_ind);
+
+    if (!ParticleSystem_Exists(ps)) return;
+
+	var pSystem = g_ParticleSystems[ps];
+
+	var matWorldOld = WebGL_GetMatrix(MATRIX_WORLD);
+
+	var matRot = new Matrix();
+	matRot.SetZRotation(pSystem.angle);
+
+	var matPos = new Matrix();
+	matPos.SetTranslation(-pSystem.xdraw, -pSystem.ydraw, 0.0);
+	
+	var matParticle = new Matrix();
+	matParticle.Multiply(matPos, matRot);
+	matParticle.Translation(pSystem.xdraw, pSystem.ydraw, 0.0);
+
+    var matWorldNew = new Matrix();
+    matWorldNew.Multiply(matParticle, matWorldOld);
+
+	WebGL_SetMatrix(MATRIX_WORLD, matWorldNew);
+	ParticleSystem_SetMatrix(ps, matWorldNew);
+	ParticleSystem_Draw(ps);
+	WebGL_SetMatrix(MATRIX_WORLD, matWorldOld);
 }
 
 

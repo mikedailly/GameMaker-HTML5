@@ -30,7 +30,14 @@ AudioPropsCalc.CalcPitch = function(_voice) {
     const asset = AudioPropsCalc.GetAssetProps(_voice.soundid);
     const emitter = AudioPropsCalc.GetEmitterProps(_voice.pemitter);
 
-    return _voice.pitch * asset.pitch * emitter.pitch;
+    const sourcePitch = _voice.pitch * asset.pitch * emitter.pitch;
+    const clampedPitch = Math.min(Math.max(1 / 256, sourcePitch), 256);
+
+    if (clampedPitch != sourcePitch) {
+        console.log("Warning: Source pitch was clipped to %f\n", clampedPitch);
+    }
+
+    return clampedPitch;
 };
 
 AudioPropsCalc.GetAssetProps = function(_asset_index) {
@@ -54,7 +61,7 @@ AudioPropsCalc.GetAssetProps = function(_asset_index) {
 AudioPropsCalc.GetEmitterProps = function(_emitter) {
     if (_emitter != null) {
         return (() => ({
-            gain: _emitter.gainnode.gain.value,
+            gain: _emitter.getGain(),
             pitch: _emitter.pitch
         }))();
     }

@@ -393,6 +393,26 @@ function LoadSwfData(_filename) {
 
 // #############################################################################################
 /// Function:<summary>
+///          	Load vector sprite data
+///          </summary>
+// #############################################################################################
+function LoadVecData(_filename) {
+	// @if feature("vec")
+    g_LoadingTotal++;	    
+	var request = new XMLHttpRequest();
+    request.open('GET', CheckWorkingDirectory(_filename), true);
+    request.responseType = 'arraybuffer';
+    request.send();
+    request.onload = function (ev) { 
+        g_LoadingCount++;             
+        g_pSpriteManager.VecLoad(request.response || request.responseText); 
+    };
+    request.onerror = function (ev) { g_LoadingCount++; };    
+	// @endif vec
+}
+
+// #############################################################################################
+/// Function:<summary>
 ///          	Load the textures..
 ///          </summary>
 ///
@@ -430,18 +450,8 @@ function LoadGame_PreLoadAssets(_GameFile)
 
     g_LoadingScreen = document.getElementById('GM4HTML5_loadingscreen');
 
-    //if (g_LoadingBarCallback === "")
-    //{
-    	PreLoadExtensions(_GameFile);
-    	g_LoadingBarCallback = yyRenderStandardLoadingBar;
-    //} else
-    //{
-	//	try{
-   // 		g_LoadingBarCallback = eval(g_LoadingBarCallback);
-	//	}catch(e){
-   // 		g_LoadingBarCallback = yyRenderStandardLoadingBar;
-	//	}
-    //}
+	PreLoadExtensions(_GameFile);
+	g_LoadingBarCallback = yyRenderStandardLoadingBar;
 
     g_LoadingCount=0;
 	// Load texture pages
@@ -462,6 +472,13 @@ function LoadGame_PreLoadAssets(_GameFile)
 	// @if feature("swf")
 	if ((_GameFile.Swfs !== null) && (_GameFile.Swfs !== undefined)) {	
 	    LoadSwfData(_GameFile.Swfs);
+    }
+	// @endif
+
+	// Load vector sprite data if it's present
+	// @if feature("vec")
+	if ((_GameFile.Vecs !== null) && (_GameFile.Vecs !== undefined)) {	
+	    LoadVecData(_GameFile.Vecs);
     }
 	// @endif
     
@@ -704,6 +721,7 @@ function CreateCollisionArrays() {
 	for (var ID1 = 0; ID1 < pool.length; ID1++)
 	{
 		var pObj = pool[ID1];
+		if (pObj === undefined) continue;
 		if (pObj.pParent !== null){
 			AddCollision(pObj.pParent.ID, pObj.pParent);
 		}
@@ -748,7 +766,7 @@ function LoadGame(_GameFile)
     for (var index = 0; index < _GameFile.GMObjects.length; index++)
     {
         var pObjStorage = _GameFile.GMObjects[index];        
-        if( pObjStorage!==null ){
+        if (( pObjStorage!==null ) && (pObjStorage !== undefined)) {
             var pObject = CreateObjectFromStorage( id,pObjStorage );
 	        g_pObjectManager.Add( pObject );
 	    }
@@ -907,7 +925,12 @@ function LoadGame(_GameFile)
 	// Load Particle Systems
     if (_GameFile.ParticleSystems !== undefined) {
         for (index = 0; index < _GameFile.ParticleSystems.length; index++) {
-			CParticleSystem.CreateFromJSON(_GameFile.ParticleSystems[index]);
+            var particleSystem = _GameFile.ParticleSystems[index];
+            if (particleSystem != undefined) {
+                CParticleSystem.CreateFromJSON(particleSystem);
+            } else {
+                CParticleSystem.CreateNull();
+            }
         }
     }
 	// @endif

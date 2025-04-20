@@ -2094,6 +2094,7 @@ function buffer_allocate(_srcByteBuffer) {
 ///          </summary>
 // #############################################################################################
 function buffer_exists(_handle){
+    if (_handle === undefined) return false;
     var pBuff = g_BufferStorage.Get(yyGetInt32(_handle));
     if (!pBuff) return 0; 
     return 1;
@@ -2920,6 +2921,47 @@ function buffer_get_surface(_buffer, _surface, _offset) {
     return true;
 }
 
+// #############################################################################################
+/// Function:<summary>
+///          	Copy contents of a depth buffer into a regular buffer.
+///          </summary>
+///
+/// In:		<param name="_buffer">The buffer to copy into.</param>
+///			<param name="_surface">The surface whose depth buffer to copy.</param>
+///			<param name="_offset">An offset (in bytes) within the buffer to start writing at.</param>
+///
+/// Out:	 <returns>
+///				Returns true on success or false on fail.
+///			 </returns>
+// #############################################################################################
+function buffer_get_surface_depth(_buffer, _surface, _offset)
+{
+    var pBuff = g_BufferStorage.Get(yyGetInt32(_buffer));
+    var pSurf = g_Surfaces.Get(yyGetInt32(_surface));
+    _offset = yyGetInt32(_offset);
+
+    if (!pBuff) {
+        yyError("buffer_get_surface_depth() - illegal buffer index " + yyGetInt32(_buffer));
+        return false;
+    }
+
+    if (!pSurf) {
+        yyError("buffer_get_surface_depth() - surface does not exist " + yyGetInt32(_surface));
+        return false;
+    }
+
+    // Surfaces don't have depth buffers when WebGL is disabled...
+    return false;
+}
+
+function buffer_get_used_size(_index)
+{
+    var pBuff = g_BufferStorage.Get(yyGetInt32(_index));
+
+    if (!pBuff) return eBuffer_UnknownBuffer;
+    return pBuff.m_UsedSize;
+
+}
 
 function buffer_set_used_size(_index, _size)
 {
@@ -2975,3 +3017,35 @@ function buffer_set_surface(_buffer, _surface, _offset)
     return true;
 }
 
+// #############################################################################################
+/// Function:<summary>
+///          	Copy data from a regular buffer into a surface's depth buffer.
+///          </summary>
+///
+/// In:		<param name="_buffer">The buffer to copy from.</param>
+///			<param name="_surface">The surface whose depth buffer to copy into.</param>
+///			<param name="_offset">An offset (in bytes) within the buffer to start reading from.</param>
+///
+/// Out:	 <returns>
+///				Returns true on success or false on fail.
+///			 </returns>
+// #############################################################################################
+function buffer_set_surface_depth(_buffer, _surface, _offset)
+{
+    var pBuff = g_BufferStorage.Get(yyGetInt32(_buffer));
+    var pSurf = g_Surfaces.Get(yyGetInt32(_surface));
+    _offset = yyGetInt32(_offset);
+
+    if (!pBuff) {
+        yyError("buffer_set_surface_depth() - illegal buffer index " + yyGetInt32(_buffer));
+        return false;
+    }
+
+    if (!pSurf) {
+        yyError("buffer_set_surface_depth() - surface does not exist " + yyGetInt32(_surface));
+        return false;
+    }
+
+    // Surfaces don't have depth buffers when WebGL is disabled...
+    return false;
+}

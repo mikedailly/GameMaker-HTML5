@@ -20,6 +20,9 @@ YYLayerType_Tile=4,
 YYLayerType_Particle=5,
 YYLayerType_Effect=6;
 
+var eLAYER_NORMAL = 1;
+var eLAYER_GUI_IN_VIEW = 2;
+var eLAYER_GUI_IN_GUI = 4;
 
 var	eLayerElementType_Undefined = 0,
 	eLayerElementType_Background=1,
@@ -30,7 +33,7 @@ var	eLayerElementType_Undefined = 0,
     eLayerElementType_ParticleSystem=6,
     eLayerElementType_Tile = 7,					// probably replace a single oldtilemap with a whole bunch of these
     eLayerElementType_Sequence = 8,
-    eLayerElementType_Effect = 9;
+    eLayerElementType_Text = 9;
 
 var TileInherit_Shift = 31;
 var TileFlip_Shift = 29;
@@ -49,6 +52,8 @@ var TileScaleRot_ShiftedMask = 0x7;
 var TileIndex_Shift = 0;
 var TileIndex_Mask = (0x7ffff << TileIndex_Shift);
 var TileIndex_ShiftedMask = (0x7ffff);
+
+var g_TransitioningUILayers = [];
 
 /** @constructor */
 function CBackGM2()
@@ -87,11 +92,17 @@ this.m_endScript=null;
 this.m_shaderId=-1;
 this.m_timer=null;
 this.m_elements = new yyList();
+this.m_elements.packing = true;
 this.m_effectEnabled = true;
 this.m_effectToBeEnabled = true;
 this.m_effect = null; // yyEffectInstanceRef
 this.m_pInitialEffectInfo = null;
 this.m_effectPS = -1;
+this.m_gui_layer = eLAYER_NORMAL;
+
+this.m_storedViewPort = [0,0,0,0];
+this.m_storedCamViewPort = [0,0,0,0];
+
 };
 
 CLayer.prototype.SetEffect = function(_effect)
@@ -119,6 +130,80 @@ CLayer.prototype.GetInitialEffectInfo = function()
     return this.m_pInitialEffectInfo;
 };
 
+CLayer.prototype.IsUILayer = function()
+{
+    return this.m_gui_layer != eLAYER_NORMAL;
+};
+
+CLayer.prototype.IsGUISpaceLayer = function()
+{
+    return this.m_gui_layer == eLAYER_GUI_IN_GUI;
+};
+
+CLayer.prototype.SetView = function()
+{
+	if (this.m_gui_layer == eLAYER_GUI_IN_VIEW)
+    {
+        var storedViewPort = this.m_storedViewPort;
+        storedViewPort[0] = g_clipx;
+        storedViewPort[1] = g_clipy;
+        storedViewPort[2] = g_clipw;
+        storedViewPort[3] = g_cliph;
+        
+        var pCam = g_pCameraManager.GetActiveCamera();
+        if (pCam != null)
+        {
+            pCam.Begin();
+            pCam.ApplyMatrices();
+
+            var storedCamViewPort = this.m_storedCamViewPort;
+            storedCamViewPort[0] = pCam.GetViewX();
+            storedCamViewPort[1] = pCam.GetViewY();
+            storedCamViewPort[2] = pCam.GetViewWidth();
+            storedCamViewPort[3] = pCam.GetViewHeight();
+        }
+
+        //x,y,w,h
+        //Setup our camera (if views are disabled then our view/camera is the whole screen)
+        if (g_RunRoom.GetEnableViews())
+        {
+            var view = g_pCurrentView;
+            var cam_width_to_use = view.portw;
+            var cam_height_to_use = view.porth;
+
+            if (pCam != null)
+            {
+                cam_width_to_use = storedCamViewPort[2];
+                cam_height_to_use = storedCamViewPort[3];
+            }
+
+            Graphics_SetViewPort(view.portx * g_DisplayScaleX, view.porty * g_DisplayScaleY, view.portw * g_DisplayScaleX, view.porth * g_DisplayScaleY);
+            UpdateCamera(0, 0, cam_width_to_use, cam_height_to_use, 0, pCam);
+        }
+    }
+};
+
+CLayer.prototype.RestoreView = function()
+{
+	if (this.m_gui_layer == eLAYER_GUI_IN_VIEW)
+    {
+
+        if (g_RunRoom.GetEnableViews()) 
+        {
+            var storedViewPort = this.m_storedViewPort;
+            Graphics_SetViewPort(storedViewPort[0], storedViewPort[1], storedViewPort[2], storedViewPort[3]);
+        }
+
+        var pCam = g_pCameraManager.GetActiveCamera();
+
+        if (pCam != null)
+        {
+            pCam.End();
+            var storedCamViewPort = this.m_storedCamViewPort;
+            UpdateCamera(storedCamViewPort[0], storedCamViewPort[1], storedCamViewPort[2], storedCamViewPort[3], 0, pCam);
+        }
+    }
+};
 
 /** @constructor */
 function YYRoomLayer()
@@ -284,6 +369,33 @@ function CLayerTileElement()
 };
 
 /** @constructor */
+function CLayerTextElement()
+{    
+    this.m_x=0;                 // x position
+    this.m_y=0;					// y position	
+    this.m_fontIndex=-1;        // font index
+    this.m_scaleX=1;          // x scale factor
+    this.m_scaleY=1;          // y scale factor
+    this.m_angle=0;           // rotation angle
+    this.m_blend=0xffffffff;  // blending for the text
+    this.m_alpha=1;           // alpha transparency for the text
+    this.m_originX=1;          // x scale factor
+    this.m_originY=1;          // y scale factor
+    this.m_text = "";           // text string to draw
+    this.m_alignment=0;          // alignment   
+    this.m_charSpacing=0;          // character spacing value
+    this.m_lineSpacing=0;          // line spacing value
+    this.m_frameW=-1;          // x scale factor
+    this.m_frameH=-1;          // y scale factor
+    this.m_wrap=false;
+
+    this.m_type = eLayerElementType_Text;
+    this.m_name = "";
+    this.m_id=0;    
+    this.m_bRuntimeDataInitialised = false;
+};
+
+/** @constructor */
 function CLayerEffectParam()
 {
     this.pName = null;
@@ -300,7 +412,6 @@ function CLayerEffectParam()
 /** @constructor */
 function CLayerEffectInfo()
 {
-    this.m_type = eLayerElementType_Effect;
     this.pName="";
     this.numParams = 0;
     this.pParams=[];
@@ -424,6 +535,12 @@ LayerManager.prototype.RemoveSequenceElement=function(_layer,_element)
     _layer.m_elements.DeleteItem(_element);
 };
 
+LayerManager.prototype.RemoveTextElement = function(_layer,_element)
+{
+    // Don't need to do anything here    
+    _layer.m_elements.DeleteItem(_element);
+};
+
 
 LayerManager.prototype.RemoveElementFromLayer= function(_room,_el,_layer,_removeDynamicLayers,_destroyInstances)
 {
@@ -471,6 +588,9 @@ LayerManager.prototype.RemoveElementFromLayer= function(_room,_el,_layer,_remove
             this.RemoveSequenceElement(layer,element);
             break;
         // @endif 
+        case eLayerElementType_Text:
+            this.RemoveTextElement(layer,element);
+            break;
     };
 
     // This doesn't exist just now - need to implement
@@ -527,7 +647,10 @@ LayerManager.prototype.RemoveElementById= function (_room,_elid,_removeDynamicLa
             break; 
         case eLayerElementType_Sequence:
             this.RemoveSequenceElement(layer,element);
-            break;      
+            break;            
+        case eLayerElementType_Text:
+            this.RemoveTextElement(layer,element);
+            break;        
     };
 
     // This doesn't exist just now - need to implement
@@ -667,6 +790,11 @@ LayerManager.prototype.BuildSequenceElementRuntimeData = function (_room, _layer
     // @endif
 };
 
+LayerManager.prototype.BuildTextElementRuntimeData = function(_room, _layer, _element)
+{
+    _element.m_bRuntimeDataInitialised=true;
+};
+
 LayerManager.prototype.BuildElementRuntimeData = function( _room ,_layer,_element)
 {
 
@@ -694,6 +822,7 @@ LayerManager.prototype.BuildElementRuntimeData = function( _room ,_layer,_elemen
         // @if feature("sequences")
         case eLayerElementType_Sequence: this.BuildSequenceElementRuntimeData(_room, _layer, _element); break;
         // @endif
+        case eLayerElementType_Text: this.BuildTextElementRuntimeData(_room, _layer, _element); break;
     }    
 };  
 
@@ -732,12 +861,36 @@ LayerManager.prototype.AddNewElement = function(_room,_layer,_element,_buildRunt
     _element.m_id = this.GetNextElementID();
     _element.m_layer = _layer;
 
+    /* Add first but keep instances first in list... unless on a UI layer.
+     *
+     * Instances are normally kept at the start of the list so the pre/post draw loop can bail
+     * out as soon as it encounters a non-instance rather than iterating over all elements on a
+     * layer, but we want to interleave instance/sprite drawing on UI Layers, so we bypass that
+     * optimisation and instead insert into the list based on the element m_order flag there.
+    */
     var insertIndex = 0;
-    if(_element.m_type != eLayerElementType_Instance)
-    {
+    if (_layer.IsUILayer()) {
         for(var elemI = 0; elemI < _layer.m_elements.pool.length; elemI++)
         {
             var pEl = _layer.m_elements.pool[elemI];
+            /* For a UI layer sorted in ascending order (lowest m_order first),
+             * set insertIndex to the index after the last element whose m_order is less than or equal 
+             * to the new element's m_order, or at the end of the list if all elements satisfy this.
+            */
+            if (pEl !== null && pEl.m_order <= _element.m_order) 
+            {
+                insertIndex = elemI + 1;
+            } 
+            else 
+            {
+                break;
+            }
+        
+        }
+    }
+    else {
+        for(var elemI = 0; elemI < _layer.m_elements.pool.length; elemI++)
+        {
             if(pEl == null || pEl.m_type != eLayerElementType_Instance)
             {
                 break;
@@ -886,6 +1039,10 @@ LayerManager.prototype.CleanElementRuntimeData = function(_element)
                 this.CleanSequenceElementRuntimeData(_element);
             } break;
         // @endif
+        case eLayerElementType_Text:
+            {
+                this.CleanTextElementRuntimeData(_element);
+            } break;
     }
 
     _element.m_bRuntimeDataInitialised = false;
@@ -960,6 +1117,11 @@ LayerManager.prototype.CleanSequenceElementRuntimeData = function(_seqEl)
     g_pSequenceManager.FreeInstance(sequenceInstance);    
 };
 
+LayerManager.prototype.CleanTextElementRuntimeData = function(_spriteEl)
+{
+    // No memory to free for this type, so just return to the pool	
+};
+
 LayerManager.prototype.AddDynamicLayer = function(_room, _depth)
 {
     var NewLayer = new CLayer();
@@ -1002,11 +1164,10 @@ LayerManager.prototype.AddInstance= function (_room,_inst)
     }
 };
 
-LayerManager.prototype.AddInstanceToLayer= function(_room,_layer,_inst)
+LayerManager.prototype.AddInstanceToLayer= function(_room,_layer,_inst,_order)
 {
-
     if(_room == null || _layer==null || _inst===null)
-        return;
+        return undefined;
    
     if(_inst.GetOnActiveLayer() === false)
     {
@@ -1016,9 +1177,12 @@ LayerManager.prototype.AddInstanceToLayer= function(_room,_layer,_inst)
         _inst.m_nLayerID = _layer.m_id;
         _inst.SetOnActiveLayer(true);
         NewInstanceElement.m_bRuntimeDataInitialised = true;
+        NewInstanceElement.m_order = _order;
         
-        g_pLayerManager.AddNewElement(_room, _layer, NewInstanceElement, false);
+        return g_pLayerManager.AddNewElement(_room, _layer, NewInstanceElement, false);
     }
+
+    return undefined;
 };
 
 LayerManager.prototype.RemoveInstance = function (_room, _inst) {
@@ -1149,16 +1313,20 @@ LayerManager.prototype.RemoveStorageInstanceFromLayer = function (_room, _layer,
     }
 };
 
-LayerManager.prototype.AddLayer = function(_room, _depth, _name)
+LayerManager.prototype.AddLayer = function(_room, _depth, _name, _type)
 {
     if (_room == null)
         return null;
+
+    if (_type === undefined)
+        _type = eLAYER_NORMAL;
 
     var NewLayer = new CLayer();
     NewLayer.m_id = this.GetNextLayerID();
     NewLayer.depth = _depth;
     NewLayer.m_pName = _name;
-    NewLayer.m_dynamic = false;    
+    NewLayer.m_dynamic = false;
+    NewLayer.m_gui_layer = _type;
 
     _room.m_Layers.Add(NewLayer);
 
@@ -1625,7 +1793,49 @@ LayerManager.prototype.CleanRoomLayers = function(_room)
             continue;
         }
 
-        this.RemoveLayer(_room, pLayer.m_id, false);        
+        if(pLayer.IsUILayer())
+        {
+            /* Stash the layer to be injected into the next room by StartRoom(). */
+
+            _room.m_Layers.Delete(pLayer);
+            g_TransitioningUILayers.push(pLayer);
+        }
+        else{
+            this.RemoveLayer(_room, pLayer.m_id, false);
+        }
+    }
+};
+
+LayerManager.prototype.RestoreUILayers = function(_room)
+{
+    while(g_TransitioningUILayers.length > 0)
+    {
+        var layer = g_TransitioningUILayers.pop();
+
+        _room.m_Layers.Add(layer);
+
+        /* Insert all elements (assets/instances/etc) on the UI layer into the room's lookup tables. */
+        for(var i = 0; i < layer.m_elements.length; i++)
+        {
+            var element = layer.m_elements.Get(i);
+            if (element == null)
+                continue;
+
+            if (element.m_type == eLayerElementType_Instance)
+            {
+                if(element.m_pInstance.active)
+                {
+                    _room.m_Active.Add(element.m_pInstance);
+                }
+                else{
+                    this.m_Deactive.Add(element.m_pInstance);
+                }
+            }
+            else if (element.m_type == eLayerElementType_Sequence)
+            {
+                _room.AddSeqInstance(element.m_id);
+            }
+        }
     }
 };
 
@@ -1989,6 +2199,37 @@ LayerManager.prototype.BuildRoomLayers = function(_room,_roomLayers)
                     }
                 }
                 // @endif
+
+                var numtextitems = 0;
+                if(pLayer.tcount!=undefined) numtextitems = pLayer.tcount;
+                if(numtextitems>0)
+                {
+                    for(var i=numtextitems-1; i>=0; i--)
+                    {                   
+                        var NewTextItem = new CLayerTextElement();
+                        NewTextItem.m_x = pLayer.textitems[i].sX;
+                        NewTextItem.m_y = pLayer.textitems[i].sY;
+                        NewTextItem.m_fontIndex = pLayer.textitems[i].sFontIndex;
+                        NewTextItem.m_scaleX = pLayer.textitems[i].sXScale;
+                        NewTextItem.m_scaleY = pLayer.textitems[i].sYScale;
+                        NewTextItem.m_angle = pLayer.textitems[i].sRotation;
+                        NewTextItem.m_blend = ConvertGMColour(pLayer.textitems[i].sBlend & 0xffffff);
+                        NewTextItem.m_alpha = ((pLayer.textitems[i].sBlend>>24)&0xff) / 255.0;                        
+                        NewTextItem.m_originX = pLayer.textitems[i].sXOrigin;
+                        NewTextItem.m_originY = pLayer.textitems[i].sYOrigin;
+                        NewTextItem.m_text = pLayer.textitems[i].sText;
+                        NewTextItem.m_alignment = pLayer.textitems[i].sAlignment;
+                        NewTextItem.m_charSpacing = pLayer.textitems[i].sCharSpacing;
+                        NewTextItem.m_lineSpacing = pLayer.textitems[i].sLineSpacing;
+                        NewTextItem.m_frameW = pLayer.textitems[i].sFrameW;
+                        NewTextItem.m_frameH = pLayer.textitems[i].sFrameH;
+                        NewTextItem.m_wrap = (pLayer.textitems[i].sWrap != 0) ? true : false;
+                        NewTextItem.m_name = pLayer.textitems[i].sName;
+                        
+                        this.AddNewElement(_room,NewLayer,NewTextItem,false);
+                    
+                    }
+                }
             }
             else if(pLayer.type === YYLayerType_Tile)
             {
@@ -2299,9 +2540,46 @@ function layer_set_visible( arg1,arg2)
     var pLayer = layerGetFromTargetRoom(arg1);
     if (pLayer === null) return;
    
-   pLayer.m_visible = yyGetBool(arg2);
-  
+    var visible = yyGetBool(arg2);
+    pLayer.m_visible = visible;
+
+    if (pLayer.IsUILayer())
+    {
+        if (visible)
+        {
+            /* Layout newly-visible UI layers to avoid spurious mouse/etc events on any instances
+            * before they have a valid position.
+            */
+            var uilayer = UILayers_Get_By_Name(pLayer.m_pName);
+
+            if (pLayer.IsGUISpaceLayer())
+            {
+                var gui_rect = Calc_GUI_Matrices_And_Rect();
+                UILayers_Layout_single_layer(uilayer, gui_rect, eLAYER_GUI_IN_GUI);
+            }
+            else {
+                var view_rect = UILayers_Calculate_Initial_View_Rect();
+                UILayers_Layout_single_layer(uilayer, view_rect, eLAYER_GUI_IN_VIEW);
+            }
+        }
+
+        for (var i = 0; i < pLayer.m_elements.length; i++) {
+            var el = pLayer.m_elements.Get(i);
+            if (el != null) {
+                if (el.m_type === eLayerElementType_Instance) {
+                    var inst = el.m_pInstance;
+                    if (visible) {
+                        g_RunRoom.ActivateInstance(inst);
+                    }
+                    else {
+                        g_RunRoom.DeactivateInstance(inst);
+                    }
+                }
+            }
+        }
+    }
 };
+
 function layer_get_visible( arg1) 
 {
     var pLayer = layerGetFromTargetRoom(arg1);
@@ -2317,6 +2595,18 @@ function layer_exists( arg1)
         
     return true;
 };
+
+function layer_get_flexpanel_node(layer_name)
+{
+    var ui_layer = UILayers_Get_By_Name(yyGetString(layer_name));
+    if(ui_layer !== null)
+    {
+        return ui_layer.node;
+    }
+    else{
+        return undefined;
+    }
+}
 
 function layer_script_begin( arg1,arg2) 
 {
@@ -3039,6 +3329,446 @@ function layer_sprite_get_y( arg1)
 
 };
 
+// Text element functions
+function layerTextGetElement(_text_element_id) 
+{
+    var room = g_pLayerManager.GetTargetRoomObj();
+    var el = g_pLayerManager.GetElementFromID(room, _text_element_id);
+
+    if ((el != null) && (el.m_type === eLayerElementType_Text)) return el;
+    return null;
+};
+
+function layer_text_get_id(_layerid,_textname)
+{
+    var room = g_pLayerManager.GetTargetRoomObj();
+    if (room === null) return -1;
+
+    var layer = layerGetObj(room, _layerid);            
+   
+    if(layer!=null)
+    {
+        var element = g_pLayerManager.GetElementFromName(layer, yyGetString(_textname));
+        if(element!=null && element.m_type == eLayerElementType_Text)
+        {
+            return element.m_id;
+        }
+    }
+    return -1;
+};
+
+function layer_text_exists( _layerid,_textelementid) 
+{
+    var room = g_pLayerManager.GetTargetRoomObj();
+    if (room === null) return false;
+
+    var layer = layerGetObj(room, _layerid);
+    if (layer === null) return false;
+
+    var el = g_pLayerManager.GetElementFromIDWithLayer(layer, yyGetInt32(_textelementid));
+    if((el!=null) && (el.m_type ===eLayerElementType_Text) )
+    {
+        return true;
+    }
+    return false;
+};
+
+function layer_text_create( _layerid,_x,_y,_font,_text) 
+{
+    var room = g_pLayerManager.GetTargetRoomObj();
+    if (room === null) return -1;
+
+    var layer = layerGetObj(room, _layerid);
+        
+    if(layer!=null)
+    {
+    
+        var textel = new CLayerTextElement();
+        
+        textel.m_fontIndex = yyGetRef(_font, REFID_FONT, g_pFontManager.Fonts.length, g_pFontManager.Fonts);
+        textel.m_x = yyGetReal(_x);
+        textel.m_y = yyGetReal(_y);
+        textel.m_text = yyGetString(_text);
+
+        g_pLayerManager.AddNewElement(room,layer,textel);
+    
+        return textel.m_id;
+    }
+    return -1;
+};
+
+function layer_text_destroy(_textelID) 
+{
+    var room = g_pLayerManager.GetTargetRoomObj();
+    if (room === null) return;
+
+    g_pLayerManager.RemoveElementById(room, yyGetInt32(_textelID));
+};
+
+function layer_text_font( _textelID,_font) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_fontIndex = yyGetRef(_font, REFID_FONT, g_pFontManager.Fonts.length, g_pFontManager.Fonts);        
+    }
+};
+
+function layer_text_text( _textelID,_text) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_text = yyGetString(_text);
+    }
+};
+
+function layer_text_halign( _textelID,_halign) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        var halign = yyGetInt32(_halign);
+        el.m_alignment = (el.m_alignment & ~0xff) | (halign & 0xff);
+    }
+};
+
+function layer_text_valign( _textelID,_valign) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        var valign = yyGetInt32(_valign);
+        el.m_alignment = (el.m_alignment & 0xff) | ((valign & 0xff) << 8);
+    }
+};
+
+function layer_text_x( _textelID,_x) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        if (!el.m_layer.IsUILayer()) {
+            el.m_x = yyGetReal(_x);
+        }
+        else {
+            el.m_uiNode.textOffsetX = _xscale;
+        }
+    }
+};
+
+function layer_text_y( _textelID,_y) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        if (!el.m_layer.IsUILayer()) {
+            el.m_y = yyGetReal(_y);
+        }
+        else {
+            el.m_uiNode.textOffsetY = yyGetReal(_y);
+        }
+    }
+};
+
+function layer_text_xscale( _textelID,_xscale) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        if (!el.m_layer.IsUILayer()) {
+            el.m_scaleX = yyGetReal(_xscale);
+        }
+        else {
+            el.m_uiNode.textScaleX = yyGetReal(_xscale);
+        }
+    }
+};
+
+function layer_text_yscale( _textelID,_yscale) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        if (!el.m_layer.IsUILayer()) {
+            el.m_scaleY = yyGetReal(_yscale);
+        }
+        else {
+            el.m_uiNode.textScaleY = yyGetReal(_yscale);
+        }
+    }
+};
+
+function layer_text_angle( _textelID,_angle) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_angle = yyGetReal(_angle);
+    }
+};
+
+function layer_text_blend( _textelID,_blend) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_blend = ConvertGMColour(yyGetInt32(_blend));
+    }
+};
+
+function layer_text_alpha( _textelID,_alpha) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_alpha = yyGetReal(_alpha);
+    }
+};
+
+function layer_text_xorigin( _textelID,_xorigin) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_originX = yyGetReal(_xorigin);
+    }
+};
+
+function layer_text_yorigin( _textelID,_yorigin) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_originY = yyGetReal(_yorigin);
+    }
+};
+
+function layer_text_charspacing( _textelID,_charspacing) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_charSpacing = yyGetReal(_charspacing);
+    }
+};
+
+function layer_text_linespacing( _textelID,_linespacing) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_lineSpacing = yyGetReal(_linespacing);
+    }
+};
+
+function layer_text_framew( _textelID,_framew) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_frameW = yyGetReal(_framew);
+    }
+};
+
+function layer_text_frameh( _textelID,_frameh) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_frameH = yyGetReal(_frameh);
+    }
+};
+
+function layer_text_wrap( _textelID,_wrap) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        el.m_wrap = yyGetBool(_wrap);
+    }
+};
+
+function layer_text_get_font( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return MAKE_REF(REFID_FONT, el.m_fontIndex);
+    }
+    return -1;
+};	
+
+function layer_text_get_text( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_text;
+    }
+    return -1;
+};	
+
+function layer_text_get_halign( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return (el.m_alignment & 0xff);
+    }
+    return 0;
+};	
+
+function layer_text_get_valign( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return ((el.m_alignment >> 8) & 0xff);
+    }
+    return 0;
+};	
+
+function layer_text_get_x( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_x;
+    }
+    return 0;
+};	
+
+function layer_text_get_y( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_y;
+    }
+    return 0;
+};	
+
+function layer_text_get_xscale( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_scaleX;
+    }
+    return 1;
+};	
+
+function layer_text_get_yscale( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_scaleY;
+    }
+    return 1;
+};	
+
+function layer_text_get_angle( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_angle;
+    }
+    return 0;
+};
+
+function layer_text_get_blend( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return ConvertGMColour(el.m_blend);
+    }
+    return 0xffffff;
+};
+
+function layer_text_get_alpha( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_alpha;
+    }
+    return 1;
+};
+
+function layer_text_get_xorigin( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_originX;
+    }
+    return 0;
+};
+
+function layer_text_get_yorigin( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_originY;
+    }
+    return 0;
+};
+
+function layer_text_get_charspacing( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_charSpacing;
+    }
+    return 0;
+};
+
+function layer_text_get_linespacing( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_lineSpacing;
+    }
+    return 0;
+};
+
+function layer_text_get_framew( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_frameW;
+    }
+    return 0;
+};
+
+function layer_text_get_frameh( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_frameH;
+    }
+    return 0;
+};
+
+function layer_text_get_wrap( _textelID) 
+{
+    var el = layerTextGetElement(_textelID);
+    if (el != null)
+    {
+        return el.m_wrap;
+    }
+    return 0;
+};
+
 // Tilemap element functions
 function layerTilemapGetElement(tm_element_id)
 {
@@ -3131,22 +3861,41 @@ function layer_tilemap_destroy( arg1)
 function layer_x(arg1,arg2)
 {
     var layer = layerGetFromTargetRoom(arg1);
-   
+
     if(layer!=null)
     {
-        layer.m_xoffset = yyGetReal(arg2);
+        if(layer.IsUILayer())
+        {
+            var ui_layer = UILayers_Get_By_Name(yyGetString(arg1));
+            if(ui_layer !== null)
+            {
+                ui_layer.x_offset = yyGetReal(arg2);
+            }
+        }
+        else{
+            layer.m_xoffset = yyGetReal(arg2);
+        }
     }
 };
 
 function layer_y(arg1,arg2)
 {
     var layer = layerGetFromTargetRoom(arg1);
-   
+
     if(layer!=null)
     {
-        layer.m_yoffset = yyGetReal(arg2);
+        if(layer.IsUILayer())
+        {
+            var ui_layer = UILayers_Get_By_Name(yyGetString(arg1));
+            if(ui_layer !== null)
+            {
+                ui_layer.y_offset = yyGetReal(arg2);
+            }
+        }
+        else{
+            layer.m_yoffset = yyGetReal(arg2);
+        }
     }
-   
 };
 
 function layer_get_x(arg1)
@@ -3155,7 +3904,17 @@ function layer_get_x(arg1)
    
     if(layer!=null)
     {
-        return layer.m_xoffset;
+        if(layer.IsUILayer())
+        {
+            var ui_layer = UILayers_Get_By_Name(yyGetString(arg1));
+            if(ui_layer !== null)
+            {
+                return ui_layer.x_offset;
+            }
+        }
+        else{
+            return layer.m_xoffset;
+        }
     }
     
     return 0;
@@ -3167,7 +3926,17 @@ function layer_get_y(arg1)
    
     if(layer!=null)
     {
-        return layer.m_yoffset;
+        if(layer.IsUILayer())
+        {
+            var ui_layer = UILayers_Get_By_Name(yyGetString(arg1));
+            if(ui_layer !== null)
+            {
+                return ui_layer.y_offset;
+            }
+        }
+        else{
+            return layer.m_yoffset;
+        }
     }
     
     return 0;
@@ -4542,8 +5311,8 @@ function layer_sequence_create(layer_id, posx, posy, sequence_id)
     newSeqEl.m_blend = -1;
     newSeqEl.m_scaleX = 1;
     newSeqEl.m_scaleY = 1;
-    newSeqEl.m_x = posx;
-    newSeqEl.m_y = posy;
+    newSeqEl.m_x = yyGetReal(posx);
+    newSeqEl.m_y = yyGetReal(posy);
     newSeqEl.m_angle = 0;
     newSeqEl.m_name = sequence.name;
 
@@ -5090,7 +5859,7 @@ function fx_set_parameter(_effect, _name, _val)
     }
     else
     {
-        var arr = arguments.slice(2);
+        var arr = Array.prototype.slice.call(arguments, 2);
         _effect.instance.SetParamVar(_name, arr);
     }
 }

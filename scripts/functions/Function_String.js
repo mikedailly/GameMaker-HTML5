@@ -122,7 +122,13 @@ function real(_v) {
     }
     else if (typeof (_v) == "string")
 	{
-        var stringAsNumber = parseFloat(_v);
+        
+        var stringAsNumber;
+        if (_v.startsWith('0x')) {
+            stringAsNumber =  parseInt(_v);
+        } else {
+            stringAsNumber =  parseFloat(_v);
+        }
         if (isNaN(stringAsNumber))
         {
 	        yyError("unable to convert string " + _v + " to real");
@@ -1241,7 +1247,7 @@ function string_split(_str, _delim, _removeEmpty, _maxSplits) {
     }
 
     // Get optional arguments
-    _removeEmpty = arguments.length > 2 ? yyGetReal(_removeEmpty) : false;
+    _removeEmpty = _removeEmpty != undefined ? yyGetReal(_removeEmpty) : false;
     _maxSplits = arguments.length > 3 ? yyGetReal(_maxSplits) : _str.length;
 
     // Escape regex symbols from delimiter.
@@ -1267,7 +1273,7 @@ function string_split_ext(_str, _delims, _removeEmpty, _maxSplits) {
     }
 
     // Get optional arguments
-    _removeEmpty = arguments.length > 2 ? yyGetReal(_removeEmpty) : false;
+    _removeEmpty = _removeEmpty != undefined ? yyGetReal(_removeEmpty) : false;
     _maxSplits = arguments.length > 3 ? yyGetReal(_maxSplits) : _str.length;
 
     // Convert delimiter to string, escape the pipe symbols, remove empty entries.
@@ -1313,7 +1319,7 @@ function string_join_ext(_delim, _values, _offset, _length) {
     }
 
     // Check raw offset and length
-    _offset = arguments.length > 2 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 3 ? yyGetReal(_length) : _values.length; 
 
     var _itValues = computeIterationValues(_values.length, _offset, _length);
@@ -1352,7 +1358,7 @@ function string_concat_ext(_values, _offset, _length) {
     }
 
     // Check raw offset and length
-    _offset = arguments.length > 1 ? yyGetReal(_offset) : 0;
+    _offset = _offset != undefined ? yyGetReal(_offset) : 0;
     _length = arguments.length > 2 ? yyGetReal(_length) : _values.length; 
 
     var _itValues = computeIterationValues(_values.length, _offset, _length);
@@ -1378,16 +1384,16 @@ function __yy_CharCodeSize(_code) {
     return (_code >= 0xD800 && _code <= 0xD8FF) ? 2 : 1;
 }
 
-function string_foreach(_str, _func, _pos, _length) {
+function string_foreach(_selfinst, _str, _func, _pos, _length) {
 
     _str = yyGetString(_str);
 
     // Check method argument
     _func = getFunction(_func, 1);
-    _obj = "boundObject" in _func ? _func.boundObject : {};
+    _obj = _func.boundObject ?? _selfinst;
 
     // Check raw offset and length
-    _pos = arguments.length > 3 ? yyGetReal(_pos) : 1;
+    _pos = _pos != undefined ? yyGetReal(_pos) : 1;
     _length = arguments.length > 3 ? yyGetReal(_length) : _str.length;
 
     var _offset = (_pos < 0 ? _pos : (_pos > 0 ? _pos - 1 : 0));

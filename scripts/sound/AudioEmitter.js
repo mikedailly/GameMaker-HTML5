@@ -6,6 +6,7 @@ class AudioEmitter {
             return null;
         }
         
+        this.gainramp = new TimeRampedParamLinear(1);
         this.gainnode = Audio_CreateGainNode(g_WebAudioContext);
         this.pannerNode = AudioEmitter.createPannerNode();
         this.pannerNode.connect(this.gainnode);
@@ -15,7 +16,7 @@ class AudioEmitter {
 }
 
 AudioEmitter.createPannerNode = function() {
-    if (typeof PannerNode === undefined) {
+    if (typeof PannerNode === "undefined") {
         return g_WebAudioContext.createPanner();
     }
 
@@ -36,6 +37,7 @@ AudioEmitter.prototype.reset = function() {
     this.pannerNode.distanceModel = falloff_model;
     this.pannerNode.panningModel = "equalpower";
 
+    this.gainramp.set(1.0);
     this.gainnode.gain.value = 1.0;
 
     g_AudioBusMain.connectInput(this.gainnode);
@@ -73,9 +75,9 @@ AudioEmitter.prototype.setBus = function(_bus) {
 };
 
 AudioEmitter.prototype.setFalloff = function(_falloffRef, _falloffMax, _falloffFactor) {
-    this.pannerNode.refDistance = _falloffRef;
-    this.pannerNode.maxDistance = _falloffMax;
-    this.pannerNode.rolloffFactor = _falloffFactor;
+    this.pannerNode.refDistance = Math.max(0, _falloffRef);
+    this.pannerNode.maxDistance = Math.max(Number.MIN_VALUE, _falloffMax);
+    this.pannerNode.rolloffFactor = Math.max(0, _falloffFactor);
     this.pannerNode.distanceModel = falloff_model;
 
     if (g_AudioFalloffModel === DistanceModels.AUDIO_FALLOFF_NONE) {
@@ -100,5 +102,25 @@ AudioEmitter.prototype.setPosition = function(_x, _y, _z) {
     this.pannerNode.positionX.value = _x;
     this.pannerNode.positionY.value = _y;
     this.pannerNode.positionZ.value = _z;
+};
+
+AudioEmitter.prototype.getGain = function() {
+    return this.gainramp.get();
+};
+
+AudioEmitter.prototype.updateGain = function() {
+    this.gainramp.update();
+    if (this.gainnode)
+        this.gainnode.gain.value = this.gainramp.get();
+};
+
+AudioEmitter.prototype.setGain = function(_gain, _timeMs = 0) {
+    _gain = Math.max(0, _gain);
+    _timeMs = Math.max(0, _timeMs);
+
+    this.gainramp.set(_gain, _timeMs);
+
+    if (_timeMs === 0)
+        this.updateGain();
 };
 // @endif audio
